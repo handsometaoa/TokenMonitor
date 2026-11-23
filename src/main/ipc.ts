@@ -49,6 +49,7 @@ function isAllowedExternal(url: string): boolean {
     if (parsed.protocol !== 'https:') return false;
     if (parsed.hostname === 'opencode.ai' || parsed.hostname.endsWith('.opencode.ai')) return true;
     if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/steipete/CodexBar')) return true;
+    if (['status.openai.com', 'status.claude.com', 'status.cursor.com', 'status.x.ai'].includes(parsed.hostname)) return true;
     return false;
   } catch {
     return false;

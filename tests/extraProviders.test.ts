@@ -38,6 +38,27 @@ describe('extra provider adapters', () => {
     expect(snapshot.windows[0].usedPercent).toBe(32);
   });
 
+  it('attaches Codex limit reset credit inventory', async () => {
+    const fetchImpl: ExtraFetch = async (url) =>
+      url.includes('rate-limit-reset-credits')
+        ? response({
+            available_count: 1,
+            credits: [
+              { id: 'c1', status: 'available', expires_at: '2026-12-20T00:00:00.000Z' },
+              { id: 'c2', status: 'redeemed', expires_at: null },
+            ],
+          })
+        : response({
+            plan_type: 'plus',
+            rate_limit: {
+              primary_window: { used_percent: 32, reset_at: 1_800_000_000, limit_window_seconds: 18000 },
+            },
+          });
+    const snapshot = await fetchCodexSnapshot(credential('codex'), fetchImpl, Date.parse('2026-11-23T00:00:00.000Z'));
+    expect(snapshot.resetCredits?.availableCount).toBe(1);
+    expect(snapshot.resetCredits?.nextExpiresAt).toBe('2026-12-20T00:00:00.000Z');
+  });
+
   it('maps Claude session, weekly and Sonnet windows', async () => {
     const snapshot = await fetchClaudeSnapshot(
       credential('claude', 'test', { planLabel: 'Max' }),

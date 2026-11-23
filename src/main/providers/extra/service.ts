@@ -77,6 +77,7 @@ function buildSnapshot(raw: RawExtraSnapshot, now = Date.now()): ExtraProviderSn
     providerName: raw.providerName,
     planLabel: raw.planLabel,
     fetchedAt: raw.fetchedAt,
+    resetCredits: raw.resetCredits ?? null,
     windows: raw.windows.map((window) => {
       const remainingPercent = Math.min(100, Math.max(0, 100 - window.usedPercent));
       const windowMs = window.windowMs ?? 30 * 24 * 60 * 60 * 1000;
@@ -106,11 +107,29 @@ function demoRaw(id: ExtraProviderId, now: number): RawExtraSnapshot {
     ...rawMeta(id),
     planLabel: demo.plan,
     fetchedAt: now,
-    windows: demo.windows.map(({ hours, ...window }) => ({
-      ...window,
-      resetsAt: new Date(now + hours * 60 * 60 * 1000).toISOString(),
-      windowMs: hours * 60 * 60 * 1000,
-    })),
+    windows: demo.windows.map(({ hours, ...window }) => {
+      const durationHours =
+        window.id === 'session'
+          ? 5
+          : window.id === 'weekly' || window.id === 'sonnet'
+            ? 7 * 24
+            : window.id === 'monthly' || window.id === 'on-demand'
+              ? 30 * 24
+              : hours;
+      return {
+        ...window,
+        resetsAt: new Date(now + hours * 60 * 60 * 1000).toISOString(),
+        windowMs: durationHours * 60 * 60 * 1000,
+      };
+    }),
+    resetCredits:
+      id === 'codex'
+        ? {
+            availableCount: 1,
+            nextExpiresAt: new Date(now + 27 * 24 * 60 * 60 * 1000).toISOString(),
+            updatedAt: now,
+          }
+        : null,
   };
 }
 

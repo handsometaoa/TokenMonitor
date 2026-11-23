@@ -4,6 +4,7 @@ import type { AppState } from '../../shared/types';
 import { BrandMark } from './components/Logo';
 import { ExtraProviderCard, UnconnectedProviders } from './components/ExtraProviderCard';
 import { ProviderCard } from './components/ProviderCard';
+import { ServiceStatusCard } from './components/ServiceStatusCard';
 import { IconButton, Spinner } from './components/ui';
 import { createTranslator } from './i18n';
 import { formatRelative } from './format';
@@ -44,6 +45,12 @@ function statusOf(state: AppState, zh: boolean): { tone: string; label: string }
   if (openCodeWindows.some((window) => window.status === 'rate-limited')) return { tone: 'danger', label: zh ? '已限流' : 'Rate limited' };
   if (extraWindows.some((window) => window.remainingPercent <= 5) || openCodeWindows.some((window) => window.remainingPercent <= 5)) {
     return { tone: 'danger', label: zh ? '接近上限' : 'Near limit' };
+  }
+  if (state.serviceStatuses.some((status) => status.indicator === 'major' || status.indicator === 'critical')) {
+    return { tone: 'danger', label: zh ? '服务异常' : 'Service issue' };
+  }
+  if (state.serviceStatuses.some((status) => status.indicator === 'minor' || status.incidentCount > 0)) {
+    return { tone: 'warn', label: zh ? '部分降级' : 'Degraded' };
   }
   if (state.extraProviders.some((provider) => provider.configured && provider.error && !provider.snapshot)) {
     return { tone: 'warn', label: zh ? '部分异常' : 'Partial' };
@@ -176,6 +183,11 @@ export function App() {
                     states={state.extraProviders.filter((provider) => !provider.configured)}
                     t={t}
                     onOpenSettings={openSettings}
+                  />
+                  <ServiceStatusCard
+                    statuses={state.serviceStatuses}
+                    language={language}
+                    onOpenExternal={(url) => void window.tokenMonitor.openExternal(url)}
                   />
                 </div>
               ) : null}

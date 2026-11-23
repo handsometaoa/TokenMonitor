@@ -11,6 +11,8 @@ Windows 托盘版 OpenCode Go 余量监控，参考 [CodexBar](https://github.co
 - **pace 节奏预测**：按窗口时间进度比较实际消耗，提示“余量充足 / 节奏正常 / 偏快”。
 - **本地 token 统计**：只读 OpenCode SQLite，按今日 / 7 天 / 30 天 / 全部展示 token、会话、模型排行。
 - **模型速度趋势**：可选开启本地测速代理，记录 TTFT 与 tok/s（实验性）。
+- **Codex 额度重置积分**：显示可用重置次数与下一次过期倒计时。
+- **Provider 状态/事件**：拉取 OpenAI / Anthropic / Cursor 的公开 Statuspage，显示服务降级、事件数量和受影响组件。
 - **Windows 原生体验**：系统托盘、flyout 面板、Toast 通知、开机自启、单实例、深色/浅色主题。
 - **隐私优先**：凭证用 Windows DPAPI 加密；不读取 prompt、回复、工具输出或其他 Provider 的 Key；不接入遥测。
 
@@ -40,6 +42,8 @@ BigModel 团队版需要额外选择器，可粘贴：
 ```
 
 ![Providers](docs/screenshots/providers.png)
+
+![Service status](docs/screenshots/status.png)
 
 ## 安装 / 运行
 
@@ -157,7 +161,9 @@ $env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"; npm install
 - Cursor 的本地 token 如果是 Chromium DPAPI 加密的 `cursor-safe-storage`，当前不会尝试解密；请粘贴 Cookie header 或 session token。
 - ZCode 自动读取当前激活的 Coding Plan 凭证；BigModel 团队版需要 Organization/Project 选择器，否则额度接口会返回“无 Coding Plan”。此时请在多 Provider 设置中粘贴团队 JSON。
 - 本地 token 统计和模型速度目前仍只针对 OpenCode；其他 Provider 只接额度。
-- 不显示金额、余额或 credits。
+- 不显示金额、余额或 credits。Codex 只显示“重置积分次数”，不显示美元成本；本地成本扫描和美元支出未启用（此前选择“不显示金额”，若要恢复可以再开）。
+- 服务状态来自公开 Statuspage：OpenAI、Anthropic、Cursor；Z.AI/ZCode 暂未发现稳定状态页。
+- 状态页请求失败时显示“状态页不可用”，不影响额度卡片。
 - 精确测速需要手动修改 OpenCode 配置，属于实验性功能；目前支持 HTTP/SSE，不支持 WebSocket 传输的测速。
 - 测速的“精确”指请求计时和上游 usage；如果上游不返回 usage，样本不会进入 tok/s 图表。
 - Windows 安装包未签名；macOS 未提供首版构建。

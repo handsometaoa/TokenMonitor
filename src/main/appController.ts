@@ -27,6 +27,7 @@ import { ProviderSecretStore } from './services/providerSecrets';
 import { QuotaNotifierService } from './services/notifier';
 import { QuotaService } from './services/quotaService';
 import { SecretStore } from './services/secrets';
+import { ServiceStatusService } from './services/serviceStatus';
 import { SettingsStore } from './services/settings';
 import { SpeedManager } from './services/speedManager';
 import { SpeedStore } from './services/speedStore';
@@ -43,6 +44,7 @@ export class AppController extends EventEmitter {
   readonly speedStore: SpeedStore;
   readonly extraSecrets: ProviderSecretStore;
   readonly extraProviders: ExtraProviderService;
+  readonly serviceStatus: ServiceStatusService;
 
   constructor(
     private readonly baseDir: string,
@@ -71,6 +73,7 @@ export class AppController extends EventEmitter {
     );
     this.speed = new SpeedManager(baseDir, this.settings, this.speedStore, this.logger, demo);
     this.extraProviders = new ExtraProviderService(this.settings, this.extraSecrets, this.logger, demo, fetchImpl);
+    this.serviceStatus = new ServiceStatusService(fetchImpl, this.logger, demo);
 
     this.settings.on('changed', (next: AppSettings) => {
       nativeTheme.themeSource = next.theme;
@@ -80,6 +83,7 @@ export class AppController extends EventEmitter {
     this.quota.on('changed', () => this.emit('state'));
     this.speed.on('changed', () => this.emit('state'));
     this.extraProviders.on('changed', () => this.emit('state'));
+    this.serviceStatus.on('changed', () => this.emit('state'));
   }
 
   start(): void {
@@ -88,11 +92,13 @@ export class AppController extends EventEmitter {
     void this.speed.start();
     this.quota.start();
     this.extraProviders.start();
+    this.serviceStatus.start();
   }
 
   async stop(): Promise<void> {
     this.quota.stop();
     this.extraProviders.stop();
+    this.serviceStatus.stop();
     await this.speed.stop();
   }
 
@@ -120,12 +126,13 @@ export class AppController extends EventEmitter {
       credentials: this.demo ? demoStatus : credentials,
       quota: this.quota.getState(),
       extraProviders: this.extraProviders.getStates(),
+      serviceStatuses: this.serviceStatus.getStatuses(),
       speed: this.speed.getStatus(),
     };
   }
 
   async refreshQuota(): Promise<AppState> {
-    await Promise.all([this.quota.refresh(true), this.extraProviders.refresh(true)]);
+    await Promise.all([this.quota.refresh(true), this.extraProviders.refresh(true), this.serviceStatus.refresh()]);
     return this.getState();
   }
 

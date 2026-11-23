@@ -216,6 +216,19 @@ export function ExtraProviderCard({
         })}
       </div>
 
+      {snapshot.resetCredits && snapshot.resetCredits.availableCount > 0 ? (
+        <div style={{ marginTop: 6 }}>
+          <Banner tone="info">
+            {language === 'zh-CN' ? '额度重置积分' : 'Limit reset credits'}:{' '}
+            <strong>{snapshot.resetCredits.availableCount}</strong>{' '}
+            {language === 'zh-CN' ? '次可用' : 'available'}
+            {snapshot.resetCredits.nextExpiresAt
+              ? ` · ${language === 'zh-CN' ? '下一个' : 'next'} ${formatCountdown(snapshot.resetCredits.nextExpiresAt, now, language)}${language === 'zh-CN' ? '后过期' : ' until expiry'}`
+              : ''}
+          </Banner>
+        </div>
+      ) : null}
+
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onOpenSettings}>
           <Settings2 size={12} />

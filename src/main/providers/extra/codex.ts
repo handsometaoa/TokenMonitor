@@ -30,6 +30,52 @@ function mapWindow(raw: CodexWindow | undefined, idPrefix: string): RawExtraWind
   };
 }
 
+async function fetchCodexResetCredits(
+  credential: ExtraProviderCredential,
+  fetchImpl: ExtraFetch,
+  now: number,
+): Promise<import('../../../shared/types').ResetCreditsInfo | null> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${credential.value}`,
+    Accept: 'application/json',
+    'User-Agent': 'TokenMonitor/0.2.1 Codex',
+    'OpenAI-Beta': 'codex-1',
+    originator: 'Codex Desktop',
+  };
+  if (credential.accountId) headers['ChatGPT-Account-ID'] = credential.accountId;
+  try {
+    const response = await fetchImpl('https://chatgpt.com/backend-api/wham/rate-limit-reset-credits', {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(5_000),
+      cache: 'no-store',
+    });
+    if (!response.ok) return null;
+    const json = (await response.json()) as Record<string, unknown>;
+    const credits = Array.isArray(json.credits) ? json.credits : [];
+    const available = credits.filter((raw) => {
+      if (!raw || typeof raw !== 'object') return false;
+      const credit = raw as Record<string, unknown>;
+      if (credit.status !== 'available') return false;
+      if (typeof credit.expires_at !== 'string') return true;
+      const expires = Date.parse(credit.expires_at);
+      return !Number.isFinite(expires) || expires > now;
+    });
+    const availableCount = typeof json.available_count === 'number' ? json.available_count : available.length;
+    const expirations = available
+      .map((raw) => (raw as Record<string, unknown>).expires_at)
+      .filter((value): value is string => typeof value === 'string')
+      .sort();
+    return {
+      availableCount,
+      nextExpiresAt: expirations[0] ?? null,
+      updatedAt: now,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchCodexSnapshot(
   credential: ExtraProviderCredential,
   fetchImpl: ExtraFetch,
@@ -38,7 +84,7 @@ export async function fetchCodexSnapshot(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${credential.value}`,
     Accept: 'application/json',
-    'User-Agent': 'TokenMonitor/0.2.0 Codex',
+    'User-Agent': 'TokenMonitor/0.2.1 Codex',
   };
   if (credential.accountId) headers['ChatGPT-Account-Id'] = credential.accountId;
 
@@ -79,11 +125,13 @@ export async function fetchCodexSnapshot(
 
   const planRaw = typeof json.plan_type === 'string' ? json.plan_type : '';
   const planLabel = planRaw ? planRaw.charAt(0).toUpperCase() + planRaw.slice(1) : 'Codex';
+  const resetCredits = await fetchCodexResetCredits(credential, fetchImpl, now);
   return {
     providerId: 'codex',
     providerName: 'Codex',
     planLabel,
     fetchedAt: now,
     windows,
+    resetCredits,
   };
 }

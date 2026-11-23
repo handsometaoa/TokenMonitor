@@ -1,4 +1,4 @@
-import type { ErrorCode, ExtraProviderId, QuotaStatus } from '../../../shared/types';
+import type { ErrorCode, ExtraProviderId, QuotaStatus, ResetCreditsInfo } from '../../../shared/types';
 
 export interface ExtraProviderCredential {
   providerId: ExtraProviderId;
@@ -26,6 +26,7 @@ export interface RawExtraSnapshot {
   planLabel: string;
   fetchedAt: number;
   windows: RawExtraWindow[];
+  resetCredits?: ResetCreditsInfo | null;
 }
 
 export class ExtraProviderError extends Error {

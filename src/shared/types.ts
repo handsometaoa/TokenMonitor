@@ -1,5 +1,5 @@
 export const APP_NAME = 'TokenMonitor';
-export const APP_VERSION = '0.2.0';
+export const APP_VERSION = '0.2.1';
 export const QUOTA_API_URL = 'https://opencode.ai/zen/go/v1/usage';
 
 export type QuotaWindowId = 'rolling' | 'weekly' | 'monthly';
@@ -17,12 +17,36 @@ export interface ExtraProviderWindow {
   pace: PaceView;
 }
 
+export interface ResetCreditsInfo {
+  availableCount: number;
+  nextExpiresAt: string | null;
+  updatedAt: number;
+}
+
 export interface ExtraProviderSnapshot {
   providerId: ExtraProviderId;
   providerName: string;
   planLabel: string;
   fetchedAt: number;
   windows: ExtraProviderWindow[];
+  resetCredits?: ResetCreditsInfo | null;
+}
+
+export interface ServiceStatusComponent {
+  name: string;
+  status: string;
+}
+
+export interface ServiceStatus {
+  providerId: ExtraProviderId;
+  providerName: string;
+  indicator: 'none' | 'minor' | 'major' | 'critical' | 'unknown';
+  description: string;
+  incidentCount: number;
+  components: ServiceStatusComponent[];
+  updatedAt: number;
+  url: string;
+  error?: string;
 }
 
 export interface ExtraProviderState {
@@ -267,6 +291,7 @@ export interface AppState {
   credentials: CredentialStatus;
   quota: QuotaState;
   extraProviders: ExtraProviderState[];
+  serviceStatuses: ServiceStatus[];
   speed: SpeedStatus;
 }
 

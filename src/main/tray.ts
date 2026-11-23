@@ -192,7 +192,13 @@ export class TrayManager {
       extraConfigured.some((provider) => provider.stale || Boolean(provider.snapshot && provider.error));
     if (stale) return 'stale';
     if (windows.some((window) => window.status === 'rate-limited' || window.remainingPercent <= 5)) return 'danger';
+    if (state.serviceStatuses.some((status) => status.indicator === 'major' || status.indicator === 'critical')) {
+      return 'danger';
+    }
     if (windows.some((window) => window.remainingPercent <= 20)) return 'warn';
+    if (state.serviceStatuses.some((status) => status.indicator === 'minor' || status.incidentCount > 0)) {
+      return 'warn';
+    }
     return 'normal';
   }
 

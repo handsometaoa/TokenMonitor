@@ -23,7 +23,7 @@ export async function fetchCursorSnapshot(
         Cookie: credential.value,
         Origin: 'https://cursor.com',
         Referer: 'https://cursor.com/dashboard',
-        'User-Agent': 'TokenMonitor/0.2.0 Cursor',
+        'User-Agent': 'TokenMonitor/0.2.1 Cursor',
       },
       signal: AbortSignal.timeout(20_000),
       cache: 'no-store',
