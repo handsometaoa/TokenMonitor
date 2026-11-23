@@ -11,7 +11,7 @@ const MIN_ELAPSED_RATIO = 0.03;
 const PACING_TOLERANCE = 5;
 
 export function computePace(input: {
-  id: QuotaWindowId;
+  id?: QuotaWindowId;
   usedPercent: number;
   remainingPercent: number;
   resetsAt: string | null;
@@ -19,7 +19,7 @@ export function computePace(input: {
   windowMs?: number;
 }): PaceView {
   const now = input.now ?? Date.now();
-  const windowMs = input.windowMs ?? WINDOW_DURATION_MS[input.id];
+  const windowMs = input.windowMs ?? (input.id ? WINDOW_DURATION_MS[input.id] : WINDOW_DURATION_MS.monthly);
   const resetMs = input.resetsAt ? Date.parse(input.resetsAt) : Number.NaN;
 
   if (!Number.isFinite(resetMs)) {

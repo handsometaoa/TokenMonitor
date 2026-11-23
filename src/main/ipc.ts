@@ -128,6 +128,21 @@ export function registerIpc(
     return controller.clearCredential();
   });
 
+  ipcMain.handle(IPC.setProviderSecret, async (event, providerId: unknown, secret: unknown) => {
+    assertTrusted(event, windows);
+    const provider = z.enum(['codex', 'claude', 'cursor', 'zai', 'zcode']).safeParse(providerId);
+    const value = z.string().min(1).max(16_000).safeParse(secret);
+    if (!provider.success || !value.success) throw new Error('Invalid provider secret');
+    return controller.setProviderSecret(provider.data, value.data);
+  });
+
+  ipcMain.handle(IPC.clearProviderSecret, async (event, providerId: unknown) => {
+    assertTrusted(event, windows);
+    const provider = z.enum(['codex', 'claude', 'cursor', 'zai', 'zcode']).safeParse(providerId);
+    if (!provider.success) throw new Error('Invalid provider');
+    return controller.clearProviderSecret(provider.data);
+  });
+
   ipcMain.handle(IPC.chooseLocalDb, async (event) => {
     assertTrusted(event, windows);
     const options = {

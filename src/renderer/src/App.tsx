@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Activity, Database, Gauge, RefreshCw, Settings2, X } from 'lucide-react';
 import type { AppState } from '../../shared/types';
 import { BrandMark } from './components/Logo';
+import { ExtraProviderCard, UnconnectedProviders } from './components/ExtraProviderCard';
 import { ProviderCard } from './components/ProviderCard';
 import { IconButton, Spinner } from './components/ui';
 import { createTranslator } from './i18n';
@@ -29,13 +30,33 @@ function Splash() {
 
 function statusOf(state: AppState, zh: boolean): { tone: string; label: string } {
   if (state.demo) return { tone: 'demo', label: zh ? '演示模式' : 'Demo' };
-  if (!state.credentials.configured) return { tone: 'off', label: zh ? '未配置' : 'Not configured' };
-  if (!state.quota.snapshot) return { tone: 'off', label: zh ? '等待数据' : 'Waiting' };
-  if (state.quota.stale || state.quota.error) return { tone: 'warn', label: zh ? '数据过期' : 'Stale' };
-  const windows = state.quota.snapshot.windows;
-  if (windows.some((window) => window.status === 'rate-limited')) return { tone: 'danger', label: zh ? '已限流' : 'Rate limited' };
-  if (windows.some((window) => window.remainingPercent <= 5)) return { tone: 'danger', label: zh ? '接近上限' : 'Near limit' };
-  if (windows.some((window) => window.remainingPercent <= 20)) return { tone: 'warn', label: zh ? '接近上限' : 'Near limit' };
+
+  const openCodeWindows = state.quota.snapshot?.windows ?? [];
+  const extraWindows = state.extraProviders.flatMap((provider) => provider.snapshot?.windows ?? []);
+  const hasAnyProvider =
+    state.credentials.configured ||
+    state.extraProviders.some((provider) => provider.configured) ||
+    openCodeWindows.length > 0 ||
+    extraWindows.length > 0;
+
+  if (!hasAnyProvider) return { tone: 'off', label: zh ? '未配置' : 'Not configured' };
+  if (extraWindows.some((window) => window.status === 'rate-limited')) return { tone: 'danger', label: zh ? '已限流' : 'Rate limited' };
+  if (openCodeWindows.some((window) => window.status === 'rate-limited')) return { tone: 'danger', label: zh ? '已限流' : 'Rate limited' };
+  if (extraWindows.some((window) => window.remainingPercent <= 5) || openCodeWindows.some((window) => window.remainingPercent <= 5)) {
+    return { tone: 'danger', label: zh ? '接近上限' : 'Near limit' };
+  }
+  if (state.extraProviders.some((provider) => provider.configured && provider.error && !provider.snapshot)) {
+    return { tone: 'warn', label: zh ? '部分异常' : 'Partial' };
+  }
+  const stale =
+    state.quota.stale ||
+    Boolean(state.quota.error && state.quota.snapshot) ||
+    state.extraProviders.some((provider) => provider.stale || Boolean(provider.error && provider.snapshot));
+  if (stale) return { tone: 'warn', label: zh ? '数据过期' : 'Stale' };
+  if (extraWindows.some((window) => window.remainingPercent <= 20) || openCodeWindows.some((window) => window.remainingPercent <= 20)) {
+    return { tone: 'warn', label: zh ? '接近上限' : 'Near limit' };
+  }
+  if (!openCodeWindows.length && !extraWindows.length) return { tone: 'off', label: zh ? '等待数据' : 'Waiting' };
   return { tone: 'good', label: zh ? '正常' : 'Normal' };
 }
 
@@ -129,14 +150,34 @@ export function App() {
             </nav>
             <div className="panel-scroll">
               {view === 'overview' ? (
-                <ProviderCard
-                  state={state}
-                  now={now}
-                  language={language}
-                  t={t}
-                  onRetry={refresh}
-                  onOpenSettings={openSettings}
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <ProviderCard
+                    state={state}
+                    now={now}
+                    language={language}
+                    t={t}
+                    onRetry={refresh}
+                    onOpenSettings={openSettings}
+                  />
+                  {state.extraProviders
+                    .filter((provider) => provider.snapshot || provider.configured)
+                    .map((provider) => (
+                      <ExtraProviderCard
+                        key={provider.providerId}
+                        state={provider}
+                        now={now}
+                        language={language}
+                        t={t}
+                        onOpenSettings={openSettings}
+                        onRefresh={refresh}
+                      />
+                    ))}
+                  <UnconnectedProviders
+                    states={state.extraProviders.filter((provider) => !provider.configured)}
+                    t={t}
+                    onOpenSettings={openSettings}
+                  />
+                </div>
               ) : null}
               {view === 'local' ? (
                 <LocalUsage state={state} language={language} t={t} onOpenSettings={openSettings} />
@@ -148,9 +189,13 @@ export function App() {
             <footer className="panel-footer">
               <span>
                 {state.demo ? `${t('app.demo')} · ` : ''}
-                {state.credentials.configured || state.demo
-                  ? formatRelative(state.quota.fetchedAt, now, language)
-                  : t('status.off')}
+                {(() => {
+                  const timestamps = [
+                    state.quota.fetchedAt,
+                    ...state.extraProviders.map((provider) => provider.fetchedAt),
+                  ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+                  return timestamps.length ? formatRelative(Math.max(...timestamps), now, language) : t('status.off');
+                })()}
               </span>
               <button type="button" className="btn btn-ghost btn-sm" onClick={refresh} disabled={state.quota.loading || (!state.credentials.configured && !state.demo)}>
                 {state.quota.loading ? <Spinner size={13} /> : <RefreshCw size={13} />}

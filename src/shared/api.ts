@@ -24,6 +24,8 @@ export interface TokenMonitorApi {
   testAndSaveKey(key: string, orgId: string): Promise<CredentialTestResult>;
   useAutoCredential(orgId: string): Promise<CredentialTestResult>;
   clearCredential(): Promise<AppState>;
+  setProviderSecret(providerId: string, secret: string): Promise<AppState>;
+  clearProviderSecret(providerId: string): Promise<AppState>;
   chooseLocalDb(): Promise<string | null>;
   setSpeedEnabled(enabled: boolean): Promise<AppState>;
   getSpeedConfig(): Promise<SpeedConfigInfo>;
@@ -51,6 +53,8 @@ export const IPC = {
   testAndSaveKey: 'credentials:test-and-save',
   useAutoCredential: 'credentials:use-auto',
   clearCredential: 'credentials:clear',
+  setProviderSecret: 'providers:set-secret',
+  clearProviderSecret: 'providers:clear-secret',
   chooseLocalDb: 'local:choose-db',
   setSpeedEnabled: 'speed:set-enabled',
   getSpeedConfig: 'speed:get-config',

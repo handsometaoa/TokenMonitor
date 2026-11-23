@@ -22,15 +22,18 @@ import type {
   AppState,
   CredentialDetection,
   CredentialTestResult,
+  ExtraProviderId,
   SpeedConfigInfo,
   UpdateSettingsPatch,
 } from '../../../shared/types';
+import { EXTRA_PROVIDER_IDS } from '../../../shared/types';
+import { EXTRA_PROVIDER_NAMES, EXTRA_PROVIDER_URLS } from '../../../shared/providers';
 import type { Translator } from '../i18n';
 import { formatRelative } from '../format';
 import { useCopy, useNow } from '../hooks';
 import { Banner, SectionCard, Segmented, Spinner, Toggle } from '../components/ui';
 
-type SettingsSection = 'general' | 'connection' | 'local' | 'speed' | 'notifications' | 'appearance' | 'data' | 'about';
+type SettingsSection = 'general' | 'connection' | 'providers' | 'local' | 'speed' | 'notifications' | 'appearance' | 'data' | 'about';
 
 interface Notice {
   tone: 'info' | 'danger';
@@ -40,6 +43,7 @@ interface Notice {
 const NAV: Array<{ id: SettingsSection; labelKey: Parameters<Translator>[0]; icon: LucideIcon }> = [
   { id: 'general', labelKey: 'settings.general', icon: SlidersHorizontal },
   { id: 'connection', labelKey: 'settings.connection', icon: KeyRound },
+  { id: 'providers', labelKey: 'settings.providers', icon: Activity },
   { id: 'local', labelKey: 'settings.local', icon: Database },
   { id: 'speed', labelKey: 'settings.speed', icon: Gauge },
   { id: 'notifications', labelKey: 'settings.notifications', icon: Bell },
@@ -68,6 +72,14 @@ export function SettingsPage({
   const [speedConfig, setSpeedConfig] = useState<SpeedConfigInfo | null>(null);
   const [speedTest, setSpeedTest] = useState<{ ok: boolean; message: string } | null>(null);
   const [localInfo, setLocalInfo] = useState<{ path: string; messages: number; schema: string } | null>(null);
+  const [providerInputs, setProviderInputs] = useState<Record<ExtraProviderId, string>>({
+    codex: '',
+    claude: '',
+    cursor: '',
+    zai: '',
+    zcode: '',
+  });
+  const [providerBusy, setProviderBusy] = useState<ExtraProviderId | null>(null);
   const { copied, copy } = useCopy();
   const now = useNow(30_000);
 
@@ -192,6 +204,35 @@ export function SettingsPage({
     }
   };
 
+  const saveProviderSecret = async (providerId: ExtraProviderId) => {
+    const secret = providerInputs[providerId].trim();
+    if (!secret) return;
+    setProviderBusy(providerId);
+    setNotice(null);
+    try {
+      await window.tokenMonitor.setProviderSecret(providerId, secret);
+      setProviderInputs((current) => ({ ...current, [providerId]: '' }));
+      setNotice({ tone: 'info', text: `${EXTRA_PROVIDER_NAMES[providerId]} 凭证已保存。` });
+    } catch (error) {
+      setNotice({ tone: 'danger', text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setProviderBusy(null);
+    }
+  };
+
+  const clearProviderSecret = async (providerId: ExtraProviderId) => {
+    setProviderBusy(providerId);
+    setNotice(null);
+    try {
+      await window.tokenMonitor.clearProviderSecret(providerId);
+      setNotice({ tone: 'info', text: `${EXTRA_PROVIDER_NAMES[providerId]} 手动凭证已清除。` });
+    } catch (error) {
+      setNotice({ tone: 'danger', text: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setProviderBusy(null);
+    }
+  };
+
   const rescanLocal = async () => {
     setBusy('local');
     try {
@@ -202,6 +243,65 @@ export function SettingsPage({
       setNotice({ tone: 'danger', text: error instanceof Error ? error.message : String(error) });
     } finally {
       setBusy(null);
+    }
+  };
+
+  const providerHint = (providerId: ExtraProviderId): string => {
+    const zh = language === 'zh-CN';
+    switch (providerId) {
+      case 'codex':
+        return zh
+          ? '自动读取 ~/.codex/auth.json 的 OAuth 登录；失效后可粘贴 access token。'
+          : 'Reads the OAuth login from ~/.codex/auth.json; paste an access token to override.';
+      case 'claude':
+        return zh
+          ? '自动读取 ~/.claude/.credentials.json；也可粘贴 Claude Code OAuth Token。'
+          : 'Reads ~/.claude/.credentials.json; paste a Claude Code OAuth token to override.';
+      case 'cursor':
+        return zh
+          ? '粘贴 cursor.com 的 Cookie header（含 WorkosCursorSessionToken），或 Cursor session token。'
+          : 'Paste the cursor.com Cookie header (including WorkosCursorSessionToken), or a Cursor session token.';
+      case 'zai':
+        return zh
+          ? 'API Key 默认使用 api.z.ai（Global）。团队 BigModel 版可粘贴 JSON：{"apiKey","organizationId","projectId","region":"bigmodel-cn"}。'
+          : 'API key defaults to api.z.ai (Global). For team BigModel, paste JSON: {"apiKey","organizationId","projectId","region":"bigmodel-cn"}.';
+      case 'zcode':
+        return zh
+          ? '自动读取 ~/.zcode/v2/config.json 的 Coding Plan 凭证；团队版可粘贴含 organizationId/projectId 的 JSON 覆盖。'
+          : 'Reads Coding Plan credentials from ~/.zcode/v2/config.json; override team plans with JSON containing organizationId/projectId.';
+      default:
+        return '';
+    }
+  };
+
+  const providerPlaceholder = (providerId: ExtraProviderId): string => {
+    const zh = language === 'zh-CN';
+    switch (providerId) {
+      case 'cursor':
+        return zh ? 'Cookie header 或 session token' : 'Cookie header or session token';
+      case 'zai':
+      case 'zcode':
+        return zh ? 'API Key 或 JSON（团队版）' : 'API key or team JSON';
+      default:
+        return zh ? 'OAuth access token' : 'OAuth access token';
+    }
+  };
+
+  const sourceLabel = (source: string): string => {
+    const zh = language === 'zh-CN';
+    switch (source) {
+      case 'manual':
+        return zh ? '手动凭证' : 'Manual';
+      case 'env':
+        return zh ? '环境变量' : 'Environment';
+      case 'auth-file':
+        return zh ? '本机登录态' : 'Local sign-in';
+      case 'zcode':
+        return zh ? 'ZCode 本机配置' : 'ZCode config';
+      case 'auto':
+        return zh ? '自动检测' : 'Auto';
+      default:
+        return zh ? '未连接' : 'Not connected';
     }
   };
 
@@ -394,6 +494,107 @@ export function SettingsPage({
                   </button>
                 </div>
               </SectionCard>
+            </>
+          ) : null}
+
+          {section === 'providers' ? (
+            <>
+              <h1 className="settings-page-title">{t('settings.providers')}</h1>
+              <p className="settings-page-sub">{t('settings.providersSub')}</p>
+              {EXTRA_PROVIDER_IDS.map((providerId) => {
+                const provider =
+                  state.extraProviders.find((item) => item.providerId === providerId) ?? null;
+                const configured = Boolean(provider?.configured);
+                const snapshot = provider?.snapshot ?? null;
+                return (
+                  <SectionCard
+                    key={providerId}
+                    title={EXTRA_PROVIDER_NAMES[providerId]}
+                    subtitle={providerHint(providerId)}
+                    action={
+                      <span className={`chip ${configured ? 'good' : 'warn'}`}>
+                        {configured ? sourceLabel(provider?.source ?? 'none') : t('extra.notConnected')}
+                      </span>
+                    }
+                  >
+                    <div className="settings-row" style={{ paddingTop: 0 }}>
+                      <div className="settings-row-copy">
+                        <strong>{snapshot?.planLabel ?? t('extra.notConnected')}</strong>
+                        <span>
+                          {provider?.error && !snapshot
+                            ? provider.error.message
+                            : snapshot
+                              ? `${t('extra.updated', { time: formatRelative(snapshot.fetchedAt, now, language) })}`
+                              : providerHint(providerId)}
+                        </span>
+                      </div>
+                      <div className="settings-control">
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() => void window.tokenMonitor.openExternal(EXTRA_PROVIDER_URLS[providerId])}
+                        >
+                          <ExternalLink size={12} />
+                          {language === 'zh-CN' ? '控制台' : 'Console'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: 4 }}>
+                      <label className="label" htmlFor={`provider-secret-${providerId}`}>
+                        {language === 'zh-CN' ? '手动凭证' : 'Manual credential'}
+                      </label>
+                      <div className="key-row">
+                        <input
+                          id={`provider-secret-${providerId}`}
+                          className="field"
+                          type="password"
+                          value={providerInputs[providerId]}
+                          onChange={(event) =>
+                            setProviderInputs((current) => ({ ...current, [providerId]: event.target.value }))
+                          }
+                          placeholder={providerPlaceholder(providerId)}
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          disabled={!providerInputs[providerId].trim() || providerBusy === providerId}
+                          onClick={() => void saveProviderSecret(providerId)}
+                        >
+                          {providerBusy === providerId ? <Spinner size={12} /> : null}
+                          {t('common.save')}
+                        </button>
+                        {configured ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            disabled={providerBusy === providerId}
+                            onClick={() => void clearProviderSecret(providerId)}
+                          >
+                            {language === 'zh-CN' ? '清除手动' : 'Clear manual'}
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="hint" style={{ marginTop: 5 }}>
+                        {providerId === 'zai' || providerId === 'zcode'
+                          ? language === 'zh-CN'
+                            ? '个人 Key 直接粘贴；BigModel 团队版粘贴 JSON（apiKey + organizationId + projectId）。'
+                            : 'Paste a personal key directly; for BigModel team plans paste JSON with apiKey + organizationId + projectId.'
+                          : language === 'zh-CN'
+                            ? '凭证使用系统加密保存，不会写入日志或渲染进程。'
+                            : 'Credentials are encrypted with the OS keystore and never sent to the renderer.'}
+                      </div>
+                    </div>
+                  </SectionCard>
+                );
+              })}
+              <Banner tone="info">
+                {language === 'zh-CN'
+                  ? 'Codex/Claude 建议先在本机登录客户端；Cursor 需要 Cookie；Z.AI 使用 API Key；ZCode 可直接读取本机 Coding Plan。'
+                  : 'Sign in to Codex/Claude locally first; Cursor needs a cookie; Z.AI uses an API key; ZCode reads the local Coding Plan.'}
+              </Banner>
             </>
           ) : null}
 

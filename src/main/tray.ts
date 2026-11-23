@@ -88,6 +88,30 @@ export class TrayManager {
       items.push({ label: state.quota.error.message, enabled: false });
     }
 
+    const extraProviders = state.extraProviders.filter((provider) => provider.configured);
+    if (extraProviders.length) {
+      items.push({ type: 'separator' });
+      for (const provider of extraProviders) {
+        const remaining = provider.snapshot?.windows.length
+          ? Math.min(...provider.snapshot.windows.map((window) => window.remainingPercent))
+          : null;
+        const suffix =
+          remaining === null
+            ? provider.error?.code === 'not-configured'
+              ? zh
+                ? '未连接'
+                : 'not connected'
+              : zh
+                ? '等待数据'
+                : 'waiting'
+            : `${zh ? '最低剩余' : 'lowest left'} ${Math.round(remaining)}%`;
+        items.push({
+          label: `${provider.providerName} · ${suffix}`,
+          enabled: false,
+        });
+      }
+    }
+
     items.push({ type: 'separator' });
     items.push({
       label: zh ? '打开面板' : 'Open dashboard',
@@ -124,24 +148,49 @@ export class TrayManager {
 
   private tooltip(state: AppState): string {
     const zh = state.settings.language === 'zh-CN';
-    if (!state.credentials.configured) return zh ? 'TokenMonitor · 未配置 OpenCode Go Key' : 'TokenMonitor · API key not configured';
+    const parts: string[] = [];
     const snapshot = state.quota.snapshot;
-    if (!snapshot) {
+    if (snapshot) {
+      for (const window of snapshot.windows) {
+        const value = state.settings.trayShowRemaining ? window.remainingPercent : window.usedPercent;
+        parts.push(`${this.windowLabel(window.id, zh)} ${Math.round(value)}%`);
+      }
+    }
+
+    for (const provider of state.extraProviders.filter((item) => item.configured && item.snapshot)) {
+      if (parts.length >= 4) break;
+      const remaining = Math.min(...provider.snapshot!.windows.map((window) => window.remainingPercent));
+      parts.push(`${provider.providerName} ${Math.round(remaining)}%`);
+    }
+
+    if (parts.length === 0) {
       return state.quota.error?.message ?? (zh ? 'TokenMonitor · 暂无数据' : 'TokenMonitor · no data');
     }
-    const parts = snapshot.windows.map((window) => {
-      const value = state.settings.trayShowRemaining ? window.remainingPercent : window.usedPercent;
-      return `${this.windowLabel(window.id, zh)} ${Math.round(value)}%`;
-    });
-    const stale = state.quota.stale ? (zh ? ' · 数据过期' : ' · stale') : '';
+    const stale =
+      state.quota.stale || state.extraProviders.some((provider) => provider.configured && provider.stale)
+        ? zh
+          ? ' · 数据过期'
+          : ' · stale'
+        : '';
     return `TokenMonitor · ${parts.join(' · ')}${stale}`;
   }
 
   private iconState(state: AppState): IconState {
-    if (!state.credentials.configured) return 'off';
-    if (!state.quota.snapshot) return state.quota.error ? 'stale' : 'off';
-    if (state.quota.stale || state.quota.error) return 'stale';
-    const windows = state.quota.snapshot.windows;
+    const extraConfigured = state.extraProviders.filter((provider) => provider.configured);
+    if (!state.credentials.configured && extraConfigured.length === 0) return 'off';
+
+    const extraWindows = extraConfigured.flatMap((provider) => provider.snapshot?.windows ?? []);
+    const openCodeWindows = state.quota.snapshot?.windows ?? [];
+    const windows = [...openCodeWindows, ...extraWindows];
+    if (windows.length === 0) {
+      const hasError = Boolean(state.quota.error) || extraConfigured.some((provider) => provider.error);
+      return hasError ? 'stale' : 'off';
+    }
+    const stale =
+      state.quota.stale ||
+      Boolean(state.quota.error) ||
+      extraConfigured.some((provider) => provider.stale || Boolean(provider.snapshot && provider.error));
+    if (stale) return 'stale';
     if (windows.some((window) => window.status === 'rate-limited' || window.remainingPercent <= 5)) return 'danger';
     if (windows.some((window) => window.remainingPercent <= 20)) return 'warn';
     return 'normal';

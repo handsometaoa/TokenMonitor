@@ -6,6 +6,7 @@ Windows 托盘版 OpenCode Go 余量监控，参考 [CodexBar](https://github.co
 
 ## 功能
 
+- **多 Provider 额度面板**：OpenCode Go、Codex、Claude、Cursor、Z.AI / GLM、ZCode；每个 Provider 独立显示额度窗口、重置时间和异常状态。
 - **OpenCode Go 三窗口余量**：5 小时、每周、每月；显示剩余/已用百分比、重置倒计时、限流状态。
 - **pace 节奏预测**：按窗口时间进度比较实际消耗，提示“余量充足 / 节奏正常 / 偏快”。
 - **本地 token 统计**：只读 OpenCode SQLite，按今日 / 7 天 / 30 天 / 全部展示 token、会话、模型排行。
@@ -14,6 +15,31 @@ Windows 托盘版 OpenCode Go 余量监控，参考 [CodexBar](https://github.co
 - **隐私优先**：凭证用 Windows DPAPI 加密；不读取 prompt、回复、工具输出或其他 Provider 的 Key；不接入遥测。
 
 ![Speed](docs/screenshots/speed.png)
+
+## Provider 接入
+
+| Provider | 自动来源 | 手动凭证 |
+|---|---|---|
+| Codex | `~/.codex/auth.json`（OAuth） | OAuth access token |
+| Claude | `~/.claude/.credentials.json`，或 `CLAUDE_OAUTH_TOKEN` | Claude Code OAuth token |
+| Cursor | Cursor `state.vscdb` 中未加密的 access token | cursor.com Cookie header 或 session token |
+| Z.AI / GLM | `Z_AI_API_KEY` / `BIGMODEL_API_KEY` 等环境变量；ZCode 的 Z.AI Key | API Key；团队 BigModel 可粘贴 JSON |
+| ZCode | `~/.zcode/v2/config.json` 的 Coding Plan Key | API Key；团队版 JSON |
+
+设置 → **多 Provider** 可以为每个 Provider 保存手动凭证。手动凭证使用系统加密保存，不会传给渲染进程或写入日志。
+
+BigModel 团队版需要额外选择器，可粘贴：
+
+```json
+{
+  "apiKey": "<BigModel API key>",
+  "organizationId": "<Bigmodel-Organization>",
+  "projectId": "<Bigmodel-Project>",
+  "region": "bigmodel-cn"
+}
+```
+
+![Providers](docs/screenshots/providers.png)
 
 ## 安装 / 运行
 
@@ -41,9 +67,10 @@ npm run dist:win
 3. 本地 token 统计默认开启，会自动读取：
    - Windows：`%USERPROFILE%\.local\share\opencode\opencode.db`
    - macOS：`~/.local/share/opencode/opencode.db`
-4. 需要更细的模型速度数据时，在“设置 → 精确测速”中启用测速代理。
+4. 需要更多 Provider 时，打开“设置 → 多 Provider”，先登录对应客户端（Codex / Claude），或填 API Key / Cookie。
+5. 需要更细的模型速度数据时，在“设置 → 精确测速”中启用测速代理。
 
-本机如果只有其他 Provider 的凭证（例如 DeepSeek），不会被读取或展示；必须使用 OpenCode Go 的 Key。
+本机如果只有其他 Provider 的凭证（例如 DeepSeek），不会被读取或展示；OpenCode 额度必须使用 OpenCode Go 的 Key。其他 Provider 的凭证只在各自设置中读取。
 
 ## 精确测速（实验性）
 
@@ -126,12 +153,16 @@ $env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"; npm install
 ## 已知限制
 
 - OpenCode Go 的 usage 接口未公开，未来可能变更。
-- 首版只支持 OpenCode Go；Command Code、Codex、Claude 等 Provider 尚未接入。
+- Codex / Claude / Cursor 在 Windows 上没有统一的安全凭证存储；本工具优先读取各自客户端的本地登录文件，或使用手动 Token/Cookie。不会刷新 OAuth Token，过期后需要重新登录客户端或更新凭证。
+- Cursor 的本地 token 如果是 Chromium DPAPI 加密的 `cursor-safe-storage`，当前不会尝试解密；请粘贴 Cookie header 或 session token。
+- ZCode 自动读取当前激活的 Coding Plan 凭证；BigModel 团队版需要 Organization/Project 选择器，否则额度接口会返回“无 Coding Plan”。此时请在多 Provider 设置中粘贴团队 JSON。
+- 本地 token 统计和模型速度目前仍只针对 OpenCode；其他 Provider 只接额度。
 - 不显示金额、余额或 credits。
 - 精确测速需要手动修改 OpenCode 配置，属于实验性功能；目前支持 HTTP/SSE，不支持 WebSocket 传输的测速。
 - 测速的“精确”指请求计时和上游 usage；如果上游不返回 usage，样本不会进入 tok/s 图表。
 - Windows 安装包未签名；macOS 未提供首版构建。
 - 本地数据库可能是 v1（`message`）或 v2（`session_message`）；混合迁移库按 message id 去重，但仍建议保留 OpenCode 原库，不要用本工具修改它。
+- Codex / Claude / Cursor / Z.AI / ZCode 的额度解析用 mock fixture 测试；没有用这些账号做真实端到端验证（本机只有 OpenCode 和 ZCode 本机凭证）。
 
 ## 归属
 

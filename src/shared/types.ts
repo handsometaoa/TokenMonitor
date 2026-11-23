@@ -1,8 +1,41 @@
 export const APP_NAME = 'TokenMonitor';
-export const APP_VERSION = '0.1.0';
+export const APP_VERSION = '0.2.0';
 export const QUOTA_API_URL = 'https://opencode.ai/zen/go/v1/usage';
 
 export type QuotaWindowId = 'rolling' | 'weekly' | 'monthly';
+export type ExtraProviderId = 'codex' | 'claude' | 'cursor' | 'zai' | 'zcode';
+export const EXTRA_PROVIDER_IDS: ExtraProviderId[] = ['codex', 'claude', 'cursor', 'zai', 'zcode'];
+
+export interface ExtraProviderWindow {
+  id: string;
+  label: string;
+  usedPercent: number;
+  remainingPercent: number;
+  resetsAt: string | null;
+  status: QuotaStatus;
+  windowMs: number;
+  pace: PaceView;
+}
+
+export interface ExtraProviderSnapshot {
+  providerId: ExtraProviderId;
+  providerName: string;
+  planLabel: string;
+  fetchedAt: number;
+  windows: ExtraProviderWindow[];
+}
+
+export interface ExtraProviderState {
+  providerId: ExtraProviderId;
+  providerName: string;
+  configured: boolean;
+  source: 'manual' | 'auto' | 'env' | 'auth-file' | 'zcode' | 'none';
+  snapshot: ExtraProviderSnapshot | null;
+  error: ProviderError | null;
+  loading: boolean;
+  stale: boolean;
+  fetchedAt: number | null;
+}
 export type QuotaStatus = 'ok' | 'rate-limited' | 'unknown';
 export type PaceState = 'insufficient' | 'ahead' | 'on-pace' | 'behind';
 
@@ -233,6 +266,7 @@ export interface AppState {
   settings: AppSettings;
   credentials: CredentialStatus;
   quota: QuotaState;
+  extraProviders: ExtraProviderState[];
   speed: SpeedStatus;
 }
 

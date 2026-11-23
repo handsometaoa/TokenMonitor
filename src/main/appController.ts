@@ -7,6 +7,7 @@ import type {
   CredentialDetection,
   CredentialStatus,
   CredentialTestResult,
+  ExtraProviderId,
   LocalUsageRange,
   LocalUsageSummary,
   QuotaHistoryPoint,
@@ -15,11 +16,14 @@ import type {
   SpeedSeries,
   UpdateSettingsPatch,
 } from '../shared/types';
+import { EXTRA_PROVIDER_IDS } from '../shared/types';
 import { CredentialResolver } from './services/credentials';
 import { QuotaHistory } from './services/history';
 import { LocalUsageService } from './providers/opencodeGo/localUsage';
 import type { FetchLike } from './providers/opencodeGo/api';
+import { ExtraProviderService } from './providers/extra/service';
 import { Logger } from './services/logger';
+import { ProviderSecretStore } from './services/providerSecrets';
 import { QuotaNotifierService } from './services/notifier';
 import { QuotaService } from './services/quotaService';
 import { SecretStore } from './services/secrets';
@@ -37,6 +41,8 @@ export class AppController extends EventEmitter {
   readonly localUsage: LocalUsageService;
   readonly speed: SpeedManager;
   readonly speedStore: SpeedStore;
+  readonly extraSecrets: ProviderSecretStore;
+  readonly extraProviders: ExtraProviderService;
 
   constructor(
     private readonly baseDir: string,
@@ -48,6 +54,7 @@ export class AppController extends EventEmitter {
     this.logger = new Logger(baseDir);
     this.settings = new SettingsStore(baseDir);
     this.secrets = new SecretStore(baseDir, this.logger);
+    this.extraSecrets = new ProviderSecretStore(baseDir, this.logger);
     this.credentials = new CredentialResolver(this.settings, this.secrets, this.logger);
     this.history = new QuotaHistory(baseDir, this.logger);
     this.speedStore = new SpeedStore(baseDir, this.logger);
@@ -63,6 +70,7 @@ export class AppController extends EventEmitter {
       fetchImpl,
     );
     this.speed = new SpeedManager(baseDir, this.settings, this.speedStore, this.logger, demo);
+    this.extraProviders = new ExtraProviderService(this.settings, this.extraSecrets, this.logger, demo, fetchImpl);
 
     this.settings.on('changed', (next: AppSettings) => {
       nativeTheme.themeSource = next.theme;
@@ -71,6 +79,7 @@ export class AppController extends EventEmitter {
     });
     this.quota.on('changed', () => this.emit('state'));
     this.speed.on('changed', () => this.emit('state'));
+    this.extraProviders.on('changed', () => this.emit('state'));
   }
 
   start(): void {
@@ -78,10 +87,12 @@ export class AppController extends EventEmitter {
     this.applyLoginItem(this.settings.get());
     void this.speed.start();
     this.quota.start();
+    this.extraProviders.start();
   }
 
   async stop(): Promise<void> {
     this.quota.stop();
+    this.extraProviders.stop();
     await this.speed.stop();
   }
 
@@ -108,12 +119,13 @@ export class AppController extends EventEmitter {
       },
       credentials: this.demo ? demoStatus : credentials,
       quota: this.quota.getState(),
+      extraProviders: this.extraProviders.getStates(),
       speed: this.speed.getStatus(),
     };
   }
 
   async refreshQuota(): Promise<AppState> {
-    await this.quota.refresh(true);
+    await Promise.all([this.quota.refresh(true), this.extraProviders.refresh(true)]);
     return this.getState();
   }
 
@@ -136,10 +148,29 @@ export class AppController extends EventEmitter {
       before.refreshMinutes !== after.refreshMinutes ||
       before.orgId !== after.orgId ||
       before.credentialSource !== after.credentialSource;
-    if (refreshChanged) this.quota.reconfigure();
+    if (refreshChanged) {
+      this.quota.reconfigure();
+      this.extraProviders.reconfigure();
+    }
     if (before.localDataPath !== after.localDataPath) this.localUsage.clearCache();
     if (before.launchAtLogin !== after.launchAtLogin) this.applyLoginItem(after);
     this.emit('state');
+    return this.getState();
+  }
+
+  async setProviderSecret(providerId: string, secret: string): Promise<AppState> {
+    if (!EXTRA_PROVIDER_IDS.includes(providerId as ExtraProviderId)) {
+      throw new Error('Invalid provider');
+    }
+    await this.extraProviders.setManualSecret(providerId as ExtraProviderId, secret);
+    return this.getState();
+  }
+
+  async clearProviderSecret(providerId: string): Promise<AppState> {
+    if (!EXTRA_PROVIDER_IDS.includes(providerId as ExtraProviderId)) {
+      throw new Error('Invalid provider');
+    }
+    await this.extraProviders.clearManualSecret(providerId as ExtraProviderId);
     return this.getState();
   }
 
