@@ -1,0 +1,16 @@
+TokenMonitor is an independent project.
+
+It is not affiliated with OpenCode, CodexBar, or their maintainers.
+
+Design inspiration and data-source behavior reference:
+  CodexBar by Peter Steinberger and contributors
+  https://github.com/steipete/CodexBar
+  MIT License
+
+OpenCode Go usage data:
+  https://opencode.ai/zen/go/v1/usage
+  This is an undocumented endpoint and may change without notice.
+
+The application uses the MIT-licensed Electron, React, Tailwind CSS, zod,
+lucide-react, and related open-source packages. Their licenses are included
+with their respective distributions.
