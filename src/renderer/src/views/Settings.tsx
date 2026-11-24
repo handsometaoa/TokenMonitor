@@ -11,6 +11,7 @@ import {
   Gauge,
   Info,
   KeyRound,
+  Network,
   Palette,
   RefreshCw,
   ShieldCheck,
@@ -33,7 +34,7 @@ import { formatRelative } from '../format';
 import { useCopy, useNow } from '../hooks';
 import { Banner, SectionCard, Segmented, Spinner, Toggle } from '../components/ui';
 
-type SettingsSection = 'general' | 'connection' | 'providers' | 'local' | 'speed' | 'notifications' | 'appearance' | 'data' | 'about';
+type SettingsSection = 'general' | 'router' | 'connection' | 'providers' | 'local' | 'speed' | 'notifications' | 'appearance' | 'data' | 'about';
 
 interface Notice {
   tone: 'info' | 'danger';
@@ -42,6 +43,7 @@ interface Notice {
 
 const NAV: Array<{ id: SettingsSection; labelKey: Parameters<Translator>[0]; icon: LucideIcon }> = [
   { id: 'general', labelKey: 'settings.general', icon: SlidersHorizontal },
+  { id: 'router', labelKey: 'settings.routerSection', icon: Network },
   { id: 'connection', labelKey: 'settings.connection', icon: KeyRound },
   { id: 'providers', labelKey: 'settings.providers', icon: Activity },
   { id: 'local', labelKey: 'settings.local', icon: Database },
@@ -398,6 +400,97 @@ export function SettingsPage({
                   </div>
                 </div>
                 {state.demo ? <Banner tone="info">{t('settings.demoNote')}</Banner> : null}
+              </SectionCard>
+            </>
+          ) : null}
+
+          {section === 'router' ? (
+            <>
+              <h1 className="settings-page-title">{t('settings.routerTitle')}</h1>
+              <p className="settings-page-sub">{t('settings.routerSub')}</p>
+              <SectionCard
+                title={t('settings.routerGateway')}
+                subtitle={t('settings.routerGatewaySub')}
+                action={
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => void window.tokenMonitor.openRouterWindow()}>
+                    <Network size={14} />
+                    {t('settings.routerOpen')}
+                  </button>
+                }
+              >
+                <div className="settings-row">
+                  <div className="settings-row-copy">
+                    <strong>{t('settings.routerStatus')}</strong>
+                    <span>
+                      {state.router.service.state === 'running'
+                        ? `127.0.0.1:${state.router.service.port}`
+                        : state.router.service.error ?? t('settings.routerStopped')}
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <span
+                      className={`chip ${
+                        state.router.service.state === 'running'
+                          ? 'good'
+                          : state.router.service.state === 'error'
+                            ? 'danger'
+                            : 'warn'
+                      }`}
+                    >
+                      {state.router.service.state === 'running'
+                        ? t('settings.routerRunning')
+                        : state.router.service.state === 'error'
+                          ? t('settings.routerError')
+                          : t('settings.routerStopped')}
+                    </span>
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-copy">
+                    <strong>{t('settings.routerPort')}</strong>
+                    <span>{`http://127.0.0.1:${state.router.service.port}/v1`}</span>
+                  </div>
+                  <div className="settings-control">
+                    <span className="mono" style={{ fontSize: 11 }}>{state.router.channelHealth.length} providers</span>
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-copy">
+                    <strong>{t('settings.routerToday')}</strong>
+                    <span>
+                      {state.router.usageToday.requests} requests · {state.router.usageToday.tokens.toLocaleString()} tokens
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <span className="mono" style={{ fontSize: 11 }}>
+                      {state.router.usageToday.successRate === null ? '—' : `${state.router.usageToday.successRate.toFixed(1)}%`}
+                    </span>
+                  </div>
+                </div>
+              </SectionCard>
+              <SectionCard title={t('settings.routerBalance')} subtitle={t('settings.routerBalanceHint')}>
+                <div className="settings-row">
+                  <div className="settings-row-copy">
+                    <strong>{t('settings.routerBalance')}</strong>
+                    <span>{state.router.balance.enabled ? 'multi-channel' : 'single-channel'}</span>
+                  </div>
+                  <div className="settings-control">
+                    <span className="mono" style={{ fontSize: 11 }}>max {state.router.balance.maxAttempts}</span>
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-copy">
+                    <strong>Session affinity / quota guard</strong>
+                    <span>
+                      {state.router.balance.sessionAffinity ? 'on' : 'off'} · {state.router.balance.quotaGuard ? 'on' : 'off'}
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => void window.tokenMonitor.openRouterWindow()}>
+                      {t('settings.routerOpen')}
+                    </button>
+                  </div>
+                </div>
               </SectionCard>
             </>
           ) : null}

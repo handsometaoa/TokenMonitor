@@ -197,6 +197,197 @@ export function registerIpc(
     return controller.clearQuotaHistory();
   });
 
+  const routerProtocolSchema = z.enum(['openai', 'openai-responses', 'anthropic']);
+  const routerProviderKindSchema = z.enum([
+    'custom',
+    'openai',
+    'anthropic',
+    'deepseek',
+    'zai',
+    'opencode',
+    'openrouter',
+    'moonshot',
+    'siliconflow',
+    'groq',
+    'xai',
+    'google',
+  ]);
+  const routerProviderInputSchema = z.object({
+    id: z.string().max(100).optional(),
+    name: z.string().min(1).max(120),
+    protocol: routerProtocolSchema,
+    kind: routerProviderKindSchema,
+    baseUrl: z.string().min(8).max(2000),
+    apiKey: z.string().max(16_000).optional(),
+    enabled: z.boolean(),
+    quotaStrategyId: z.string().max(100).nullable().optional(),
+    strategyConfig: z.record(z.string(), z.string()).optional(),
+  });
+  const routerModelInputSchema = z.object({
+    id: z.string().max(100).optional(),
+    providerId: z.string().min(1).max(100),
+    publicName: z.string().min(1).max(200),
+    upstreamName: z.string().min(1).max(200),
+    enabled: z.boolean(),
+  });
+  const routerServicePatchSchema = z.object({
+    enabled: z.boolean().optional(),
+    port: z.number().int().min(1024).max(65_535).optional(),
+    apiKey: z.string().max(500).optional(),
+    proxyUrl: z.string().max(2000).optional(),
+  });
+  const routerBalancePatchSchema = z.object({
+    enabled: z.boolean().optional(),
+    sessionAffinity: z.boolean().optional(),
+    quotaGuard: z.boolean().optional(),
+    maxAttempts: z.number().int().min(1).max(5).optional(),
+  });
+  const routerLogQuerySchema = z.object({
+    limit: z.number().int().min(1).max(200).optional(),
+    offset: z.number().int().min(0).max(1_000_000).optional(),
+    model: z.string().max(200).nullable().optional(),
+    status: z.number().int().min(100).max(599).nullable().optional(),
+    search: z.string().max(200).nullable().optional(),
+  });
+
+  ipcMain.handle(IPC.getRouterState, (event) => {
+    assertTrusted(event, windows);
+    return controller.getRouterState();
+  });
+
+  ipcMain.handle(IPC.listRouterProviders, (event, includeArchived: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = z.boolean().optional().safeParse(includeArchived);
+    if (!parsed.success) throw new Error('Invalid provider filter');
+    return controller.listRouterProviders(parsed.data ?? false);
+  });
+
+  ipcMain.handle(IPC.saveRouterProvider, (event, input: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = routerProviderInputSchema.safeParse(input);
+    if (!parsed.success) throw new Error('Invalid router provider');
+    return controller.saveRouterProvider(parsed.data);
+  });
+
+  ipcMain.handle(IPC.archiveRouterProvider, (event, id: unknown, archived: unknown) => {
+    assertTrusted(event, windows);
+    const idParsed = z.string().min(1).max(100).safeParse(id);
+    const archivedParsed = z.boolean().safeParse(archived);
+    if (!idParsed.success || !archivedParsed.success) throw new Error('Invalid provider archive request');
+    return controller.archiveRouterProvider(idParsed.data, archivedParsed.data);
+  });
+
+  ipcMain.handle(IPC.deleteRouterProvider, (event, id: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = z.string().min(1).max(100).safeParse(id);
+    if (!parsed.success) throw new Error('Invalid provider id');
+    return controller.deleteRouterProvider(parsed.data);
+  });
+
+  ipcMain.handle(IPC.listRouterModels, (event, includeArchived: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = z.boolean().optional().safeParse(includeArchived);
+    if (!parsed.success) throw new Error('Invalid model filter');
+    return controller.listRouterModels(parsed.data ?? false);
+  });
+
+  ipcMain.handle(IPC.saveRouterModel, (event, input: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = routerModelInputSchema.safeParse(input);
+    if (!parsed.success) throw new Error('Invalid router model');
+    return controller.saveRouterModel(parsed.data);
+  });
+
+  ipcMain.handle(IPC.archiveRouterModel, (event, id: unknown, archived: unknown) => {
+    assertTrusted(event, windows);
+    const idParsed = z.string().min(1).max(100).safeParse(id);
+    const archivedParsed = z.boolean().safeParse(archived);
+    if (!idParsed.success || !archivedParsed.success) throw new Error('Invalid model archive request');
+    return controller.archiveRouterModel(idParsed.data, archivedParsed.data);
+  });
+
+  ipcMain.handle(IPC.deleteRouterModel, (event, id: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = z.string().min(1).max(100).safeParse(id);
+    if (!parsed.success) throw new Error('Invalid model id');
+    return controller.deleteRouterModel(parsed.data);
+  });
+
+  ipcMain.handle(IPC.getRouterServiceConfig, (event) => {
+    assertTrusted(event, windows);
+    return controller.getRouterServiceConfig();
+  });
+
+  ipcMain.handle(IPC.saveRouterServiceConfig, async (event, patch: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = routerServicePatchSchema.safeParse(patch);
+    if (!parsed.success) throw new Error('Invalid router service config');
+    return controller.saveRouterServiceConfig(parsed.data);
+  });
+
+  ipcMain.handle(IPC.regenerateRouterApiKey, async (event) => {
+    assertTrusted(event, windows);
+    return controller.regenerateRouterApiKey();
+  });
+
+  ipcMain.handle(IPC.getRouterBalance, (event) => {
+    assertTrusted(event, windows);
+    return controller.getRouterBalance();
+  });
+
+  ipcMain.handle(IPC.saveRouterBalance, (event, patch: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = routerBalancePatchSchema.safeParse(patch);
+    if (!parsed.success) throw new Error('Invalid router balance config');
+    return controller.saveRouterBalance(parsed.data);
+  });
+
+  ipcMain.handle(IPC.getRouterUsage, (event, range: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = z.enum(['today', '24h', '7d', '30d']).safeParse(range);
+    if (!parsed.success) throw new Error('Invalid router usage range');
+    return controller.getRouterUsage(parsed.data);
+  });
+
+  ipcMain.handle(IPC.getRouterLogs, (event, query: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = routerLogQuerySchema.safeParse(query ?? {});
+    if (!parsed.success) throw new Error('Invalid router log query');
+    return controller.getRouterLogs(parsed.data);
+  });
+
+  ipcMain.handle(IPC.getRouterLog, (event, id: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = z.number().int().min(1).safeParse(id);
+    if (!parsed.success) throw new Error('Invalid log id');
+    return controller.getRouterLog(parsed.data);
+  });
+
+  ipcMain.handle(IPC.getRouterQuota, (event) => {
+    assertTrusted(event, windows);
+    return controller.getRouterQuota();
+  });
+
+  ipcMain.handle(IPC.refreshRouterQuota, async (event) => {
+    assertTrusted(event, windows);
+    return controller.refreshRouterQuota();
+  });
+
+  ipcMain.handle(IPC.getRouterQuotaStrategies, (event) => {
+    assertTrusted(event, windows);
+    return controller.getRouterQuotaStrategies();
+  });
+
+  ipcMain.handle(IPC.clearRouterLogs, (event) => {
+    assertTrusted(event, windows);
+    return controller.clearRouterLogs();
+  });
+
+  ipcMain.handle(IPC.openRouterWindow, (event) => {
+    assertTrusted(event, windows);
+    windows.showRouter();
+  });
+
   ipcMain.handle(IPC.openSettings, (event) => {
     assertTrusted(event, windows);
     windows.showSettings();

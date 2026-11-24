@@ -5,6 +5,7 @@ import type { AppState } from '../shared/types';
 export class WindowManager {
   private mainWindow: BrowserWindow | null = null;
   private settingsWindow: BrowserWindow | null = null;
+  private routerWindow: BrowserWindow | null = null;
   private pendingShow = false;
   private quitting = false;
   private closeNoticeShown = false;
@@ -185,8 +186,62 @@ export class WindowManager {
     }
   }
 
+  showRouter(): void {
+    if (this.routerWindow && !this.routerWindow.isDestroyed()) {
+      if (this.routerWindow.isMinimized()) this.routerWindow.restore();
+      this.routerWindow.show();
+      this.routerWindow.focus();
+      return;
+    }
+
+    const window = new BrowserWindow({
+      width: 1180,
+      height: 800,
+      minWidth: 980,
+      minHeight: 640,
+      show: false,
+      autoHideMenuBar: true,
+      backgroundColor: nativeTheme.shouldUseDarkColors ? '#0b0d12' : '#f4f2ee',
+      title: 'TokenMonitor AI Router',
+      icon: join(app.getAppPath(), 'resources', 'icons', 'app.png'),
+      webPreferences: {
+        preload: join(__dirname, '../preload/index.cjs'),
+        contextIsolation: true,
+        sandbox: true,
+        nodeIntegration: false,
+        spellcheck: false,
+        devTools: !app.isPackaged,
+      },
+    });
+    this.routerWindow = window;
+    const webContentsId = window.webContents.id;
+    this.trustedIds.add(webContentsId);
+    window.once('ready-to-show', () => {
+      window.show();
+      window.focus();
+    });
+    window.on('closed', () => {
+      this.trustedIds.delete(webContentsId);
+      this.routerWindow = null;
+    });
+    window.webContents.setWindowOpenHandler(({ url }) => {
+      if (url.startsWith('https://')) void shell.openExternal(url);
+      return { action: 'deny' };
+    });
+    window.webContents.on('will-navigate', (event, url) => {
+      if (url !== window.webContents.getURL()) event.preventDefault();
+    });
+
+    const devUrl = process.env.ELECTRON_RENDERER_URL;
+    if (devUrl) {
+      void window.loadURL(`${devUrl}#router`);
+    } else {
+      void window.loadFile(join(__dirname, '../renderer/index.html'), { hash: 'router' });
+    }
+  }
+
   broadcast(state: AppState): void {
-    for (const window of [this.mainWindow, this.settingsWindow]) {
+    for (const window of [this.mainWindow, this.settingsWindow, this.routerWindow]) {
       if (window && !window.isDestroyed()) {
         window.webContents.send('app:state-changed', state);
       }

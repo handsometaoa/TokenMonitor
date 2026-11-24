@@ -1,6 +1,6 @@
 # TokenMonitor
 
-Windows 托盘版 OpenCode Go 余量监控，参考 [CodexBar](https://github.com/steipete/CodexBar) 的产品设计，使用 Electron + React 独立实现。
+Windows 托盘版 OpenCode Go 余量监控 + 本地 AI 路由网关，参考 [CodexBar](https://github.com/steipete/CodexBar) 与 [ai-router](https://github.com/q2316367743/ai-router) 的产品设计，使用 Electron + React 独立实现。
 
 ![Overview](docs/screenshots/overview.png)
 
@@ -12,6 +12,11 @@ Windows 托盘版 OpenCode Go 余量监控，参考 [CodexBar](https://github.co
 - **本地 token 统计**：只读 OpenCode SQLite，按今日 / 7 天 / 30 天 / 全部展示 token、会话、模型排行。
 - **TTFT 趋势**：可选开启本地测速代理，按模型记录实时首 token 延迟；有 usage 时附带 tok/s。
 - **历史性能复盘**：直接读取本机 OpenCode 会话记录，回溯 TTFT、输出 tok/s、prefill 速度与 Agent 单轮耗时；支持 7 天 / 30 天 / 全部，无需开启代理。
+- **路由优先总览**：主面板首屏聚合网关状态、今日请求/Tokens、所有 Provider 余量摘要、近 7 天用量和最近请求；OpenCode 只是其中一个数据源。
+- **本地 AI 路由**：OpenAI Chat / Anthropic Messages / OpenAI Responses 三协议入口与 3×3 转换，按对外模型名组成渠道组，自动故障转移。
+- **负载均衡**：可用度权重、会话亲和、额度前置拦截；只在尚未向客户端写出字节时改道。
+- **请求日志与用量**：记录最终渠道、状态、耗时、token、重试轨迹；按日/小时聚合，提供成功率、缓存与趋势看板。
+- **路由控制台**：独立 1180×800 窗口，提供商、模型渠道、服务、日志、用量、余量、设置七个页面。
 - **Codex 额度重置积分**：显示可用重置次数与下一次过期倒计时。
 - **Provider 状态/事件**：拉取 OpenAI / Anthropic / Cursor 的公开 Statuspage，显示服务降级、事件数量和受影响组件。
 - **Windows 原生体验**：系统托盘、flyout 面板、Toast 通知、开机自启、单实例、深色/浅色主题。
@@ -91,6 +96,30 @@ TTFT 页的“会话历史”数据源直接读取 OpenCode SQLite 的 `message`
 
 历史值是**回放**口径，不能拆分上游服务端排队、网络和 prefill；需要严格测量时仍可使用本地代理。若 OpenCode 未来改变 `part` 时序字段，相关指标会显示为空，而不是猜测。
 
+## AI 路由（本地网关）
+
+托盘菜单 →「路由控制台…」，或监控面板右上角网络图标，打开独立的 AI Router 控制台。
+
+- **提供商**：Base URL（完整 API 根，含 `/v1`）、协议（openai / anthropic / openai-responses）、API Key / OAuth token / Cookie、余量策略。
+- **模型渠道**：对外模型名 → 上游模型名；同名多行即一个渠道组，由负载均衡选路。
+- **本地网关**：默认关闭，启动后只监听 `127.0.0.1:<port>`；同时兼容三种协议入口和 `/v1/models`。
+- **日志/用量**：请求进入后写 pending，结束后回填；token 只统计成功请求，未返回 usage 时按字符估算。
+- **余量**：内置 9 家策略（OpenCode、Z.AI、Codex、Claude、Cursor、DeepSeek、OpenRouter、Moonshot、SiliconFlow），额度耗尽自动阻断渠道。
+- **安全**：上游 Key 不写入路由库，使用 DPAPI/Keychain 加密；本地网关 Key 独立生成，可随时重置；支持 HTTP(S) 上游代理。
+
+接入示例：
+
+```bash
+curl http://127.0.0.1:8787/v1/chat/completions \
+  -H "Authorization: Bearer <本地网关 Key>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"your-public-model","messages":[{"role":"user","content":"hi"}],"stream":true}'
+```
+
+Anthropic 客户端使用 `/v1/messages` 与 `x-api-key`；Responses 客户端使用 `/v1/responses`。详细设计见 [docs/router.md](docs/router.md)。
+
+![AI Router](docs/screenshots/router.png)
+
 ## 精确测速（实验性）
 
 精确测速不是 CodexBar 的原有功能，是本项目的扩展：
@@ -112,6 +141,8 @@ TTFT 页的“会话历史”数据源直接读取 OpenCode SQLite 的 `message`
 %APPDATA%\TokenMonitor\
 ├─ settings.json
 ├─ secret.bin              # DPAPI 加密
+├─ provider-secrets.bin    # 路由/多 Provider 凭证，DPAPI 加密
+├─ router.db               # 路由提供商、模型、日志、用量、余量
 ├─ quota-history\          # 90 天额度快照
 ├─ speed-samples\          # 90 天测速样本
 └─ logs\                   # 脱敏日志
@@ -177,7 +208,11 @@ $env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"; npm install
 - Codex / Claude / Cursor 在 Windows 上没有统一的安全凭证存储；本工具优先读取各自客户端的本地登录文件，或使用手动 Token/Cookie。不会刷新 OAuth Token，过期后需要重新登录客户端或更新凭证。
 - Cursor 的本地 token 如果是 Chromium DPAPI 加密的 `cursor-safe-storage`，当前不会尝试解密；请粘贴 Cookie header 或 session token。
 - ZCode 自动读取当前激活的 Coding Plan 凭证；BigModel 团队版需要 Organization/Project 选择器，否则额度接口会返回“无 Coding Plan”。此时请在多 Provider 设置中粘贴团队 JSON。
-- 本地 token 统计、历史性能复盘和 TTFT 目前仍只针对 OpenCode；其他 Provider 只接额度。
+- 本地 token 统计、历史性能复盘和 TTFT 目前仍只针对 OpenCode；其他 Provider 只接额度或路由。
+- AI Router 的余量策略目前内置 9 家；ai-router 的其余 provider 适配器尚未移植，策略注册表已留扩展点。
+- 路由日志默认保存请求/响应正文（鉴权头已剔除），保留 7 天；敏感场景请手动清空日志或后续增加“只记元数据”开关。
+- 跨协议转换不保证协议特有字段全量保真；需要原样透传时让入口协议与上游协议一致。
+- 路由服务默认关闭；启动后仅监听 loopback，不会主动对外开放。
 - 历史 TTFT 为回放值，包含请求排队与网络，无法拆分上游服务端耗时；精确测量仍以本地代理为准。
 - 历史性能指标依赖 OpenCode `part` 的 `time.start` / `time.end` 和 `step-finish` token；字段缺失时该步会跳过对应指标。
 - 不显示金额、余额或 credits。Codex 只显示“重置积分次数”，不显示美元成本；本地成本扫描和美元支出未启用（此前选择“不显示金额”，若要恢复可以再开）。

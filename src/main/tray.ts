@@ -118,11 +118,31 @@ export class TrayManager {
       click: () => this.windows.showMain(),
     });
     items.push({
+      label: `AI Router · ${
+        state.router.service.state === 'running'
+          ? zh
+            ? `运行中 · ${state.router.usageToday.requests} 请求`
+            : `running · ${state.router.usageToday.requests} req`
+          : state.router.service.state === 'error'
+            ? zh
+              ? '异常'
+              : 'error'
+            : zh
+              ? '已停止'
+              : 'stopped'
+      }`,
+      enabled: false,
+    });
+    items.push({
       label: zh ? '立即刷新' : 'Refresh now',
       enabled: state.credentials.configured || state.demo,
       click: () => {
         void this.controller.refreshQuota();
       },
+    });
+    items.push({
+      label: zh ? '路由控制台…' : 'AI Router…',
+      click: () => this.windows.showRouter(),
     });
     items.push({
       label: zh ? '设置…' : 'Settings…',
@@ -149,6 +169,11 @@ export class TrayManager {
   private tooltip(state: AppState): string {
     const zh = state.settings.language === 'zh-CN';
     const parts: string[] = [];
+    parts.push(
+      state.router.service.state === 'running'
+        ? `${zh ? '路由' : 'Router'} ${state.router.usageToday.requests}${zh ? ' 请求' : ' req'}`
+        : `${zh ? '路由' : 'Router'} ${zh ? '已停止' : 'off'}`,
+    );
     const snapshot = state.quota.snapshot;
     if (snapshot) {
       for (const window of snapshot.windows) {
@@ -177,6 +202,7 @@ export class TrayManager {
 
   private iconState(state: AppState): IconState {
     const extraConfigured = state.extraProviders.filter((provider) => provider.configured);
+    if (state.router.service.state === 'error') return 'stale';
     if (!state.credentials.configured && extraConfigured.length === 0) return 'off';
 
     const extraWindows = extraConfigured.flatMap((provider) => provider.snapshot?.windows ?? []);

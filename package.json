@@ -1,6 +1,6 @@
 {
   "name": "tokenmonitor",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A Windows tray monitor for OpenCode Go usage, inspired by CodexBar.",
   "main": "./out/main/index.js",
   "author": "TokenMonitor contributors",
@@ -24,6 +24,7 @@
     "lucide-react": "^1.78.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "undici": "^7.30.2",
     "zod": "^4.6.7"
   },
   "devDependencies": {

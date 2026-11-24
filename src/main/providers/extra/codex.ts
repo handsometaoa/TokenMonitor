@@ -38,7 +38,7 @@ async function fetchCodexResetCredits(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${credential.value}`,
     Accept: 'application/json',
-    'User-Agent': 'TokenMonitor/0.3.0 Codex',
+    'User-Agent': 'TokenMonitor/0.4.0 Codex',
     'OpenAI-Beta': 'codex-1',
     originator: 'Codex Desktop',
   };
@@ -84,7 +84,7 @@ export async function fetchCodexSnapshot(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${credential.value}`,
     Accept: 'application/json',
-    'User-Agent': 'TokenMonitor/0.3.0 Codex',
+    'User-Agent': 'TokenMonitor/0.4.0 Codex',
   };
   if (credential.accountId) headers['ChatGPT-Account-Id'] = credential.accountId;
 

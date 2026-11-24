@@ -34,6 +34,23 @@ import { ServiceStatusService } from './services/serviceStatus';
 import { SettingsStore } from './services/settings';
 import { SpeedManager } from './services/speedManager';
 import { SpeedStore } from './services/speedStore';
+import { RouterService } from './router/service';
+import type {
+  RouterBalanceConfig,
+  RouterLogEntry,
+  RouterLogPage,
+  RouterLogQuery,
+  RouterModelGroup,
+  RouterModelInput,
+  RouterProvider,
+  RouterProviderInput,
+  RouterQuotaSnapshot,
+  RouterQuotaStrategyInfo,
+  RouterServiceConfig,
+  RouterState,
+  RouterUsageOverview,
+  RouterUsageRange,
+} from '../shared/routerTypes';
 
 export class AppController extends EventEmitter {
   readonly logger: Logger;
@@ -49,6 +66,7 @@ export class AppController extends EventEmitter {
   readonly extraSecrets: ProviderSecretStore;
   readonly extraProviders: ExtraProviderService;
   readonly serviceStatus: ServiceStatusService;
+  readonly router: RouterService;
 
   constructor(
     private readonly baseDir: string,
@@ -79,6 +97,8 @@ export class AppController extends EventEmitter {
     this.speed = new SpeedManager(baseDir, this.settings, this.speedStore, this.logger, demo);
     this.extraProviders = new ExtraProviderService(this.settings, this.extraSecrets, this.logger, demo, fetchImpl);
     this.serviceStatus = new ServiceStatusService(fetchImpl, this.logger, demo);
+    this.router = new RouterService(baseDir, this.logger, this.extraSecrets, fetchImpl, demo);
+    this.router.on('changed', () => this.emit('state'));
 
     this.settings.on('changed', (next: AppSettings) => {
       nativeTheme.themeSource = next.theme;
@@ -95,6 +115,7 @@ export class AppController extends EventEmitter {
     nativeTheme.themeSource = this.settings.get().theme;
     this.applyLoginItem(this.settings.get());
     void this.speed.start();
+    void this.router.start();
     this.quota.start();
     this.extraProviders.start();
     this.serviceStatus.start();
@@ -105,6 +126,7 @@ export class AppController extends EventEmitter {
     this.extraProviders.stop();
     this.serviceStatus.stop();
     await this.speed.stop();
+    await this.router.stop();
   }
 
   getState(): AppState {
@@ -133,6 +155,7 @@ export class AppController extends EventEmitter {
       extraProviders: this.extraProviders.getStates(),
       serviceStatuses: this.serviceStatus.getStatuses(),
       speed: this.speed.getStatus(),
+      router: this.router.getState(),
     };
   }
 
@@ -270,6 +293,90 @@ export class AppController extends EventEmitter {
 
   setLaunchAtLogin(enabled: boolean): AppState {
     return this.updateSettings({ launchAtLogin: enabled });
+  }
+
+  getRouterState(): RouterState {
+    return this.router.getState();
+  }
+
+  listRouterProviders(includeArchived = false): RouterProvider[] {
+    return this.router.listProviders(includeArchived);
+  }
+
+  saveRouterProvider(input: RouterProviderInput): RouterProvider[] {
+    return this.router.saveProvider(input);
+  }
+
+  archiveRouterProvider(id: string, archived: boolean): RouterProvider[] {
+    return this.router.archiveProvider(id, archived);
+  }
+
+  deleteRouterProvider(id: string): RouterProvider[] {
+    return this.router.deleteProvider(id);
+  }
+
+  listRouterModels(includeArchived = false): RouterModelGroup[] {
+    return this.router.listModels(includeArchived);
+  }
+
+  saveRouterModel(input: RouterModelInput): RouterModelGroup[] {
+    return this.router.saveModel(input);
+  }
+
+  archiveRouterModel(id: string, archived: boolean): RouterModelGroup[] {
+    return this.router.archiveModel(id, archived);
+  }
+
+  deleteRouterModel(id: string): RouterModelGroup[] {
+    return this.router.deleteModel(id);
+  }
+
+  getRouterServiceConfig(): RouterServiceConfig {
+    return this.router.getServiceConfig();
+  }
+
+  async saveRouterServiceConfig(patch: Partial<RouterServiceConfig>): Promise<RouterState> {
+    return this.router.saveServiceConfig(patch);
+  }
+
+  async regenerateRouterApiKey(): Promise<RouterState> {
+    return this.router.regenerateApiKey();
+  }
+
+  getRouterBalance(): RouterBalanceConfig {
+    return this.router.getBalanceConfig();
+  }
+
+  saveRouterBalance(patch: Partial<RouterBalanceConfig>): RouterState {
+    return this.router.saveBalanceConfig(patch);
+  }
+
+  getRouterUsage(range: RouterUsageRange): RouterUsageOverview {
+    return this.router.getUsage(range);
+  }
+
+  getRouterLogs(query: RouterLogQuery): RouterLogPage {
+    return this.router.getLogs(query);
+  }
+
+  getRouterLog(id: number): RouterLogEntry | null {
+    return this.router.getLog(id);
+  }
+
+  getRouterQuota(): RouterQuotaSnapshot[] {
+    return this.router.getQuota();
+  }
+
+  async refreshRouterQuota(): Promise<RouterQuotaSnapshot[]> {
+    return this.router.refreshQuota();
+  }
+
+  getRouterQuotaStrategies(): RouterQuotaStrategyInfo[] {
+    return this.router.getQuotaStrategies();
+  }
+
+  clearRouterLogs(): RouterState {
+    return this.router.clearLogs();
   }
 
   private applyLoginItem(settings: AppSettings): void {

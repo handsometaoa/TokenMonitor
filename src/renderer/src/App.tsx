@@ -1,20 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Activity, Database, Gauge, RefreshCw, Settings2, X } from 'lucide-react';
+import { Activity, Database, Gauge, LayoutDashboard, Network, RefreshCw, Settings2, X } from 'lucide-react';
 import type { AppState } from '../../shared/types';
 import { BrandMark } from './components/Logo';
 import { ExtraProviderCard, UnconnectedProviders } from './components/ExtraProviderCard';
 import { ProviderCard } from './components/ProviderCard';
+import { RouterQuotaCard } from './components/RouterQuotaCard';
 import { ServiceStatusCard } from './components/ServiceStatusCard';
 import { IconButton, Spinner } from './components/ui';
 import { createTranslator } from './i18n';
 import { formatRelative } from './format';
 import { useNow, useTheme } from './hooks';
+import { Home } from './views/Home';
 import { LocalUsage } from './views/LocalUsage';
 import { Onboarding } from './views/Onboarding';
 import { SettingsPage } from './views/Settings';
 import { Speed } from './views/Speed';
+import { RouterApp } from './router/RouterApp';
 
-type View = 'overview' | 'local' | 'speed';
+type View = 'home' | 'quota' | 'local' | 'speed';
 
 function Splash() {
   return (
@@ -49,6 +52,9 @@ function statusOf(state: AppState, zh: boolean): { tone: string; label: string }
   if (state.serviceStatuses.some((status) => status.indicator === 'major' || status.indicator === 'critical')) {
     return { tone: 'danger', label: zh ? '服务异常' : 'Service issue' };
   }
+  if (state.router.service.state === 'error') {
+    return { tone: 'warn', label: zh ? '路由异常' : 'Router error' };
+  }
   if (state.serviceStatuses.some((status) => status.indicator === 'minor' || status.incidentCount > 0)) {
     return { tone: 'warn', label: zh ? '部分降级' : 'Degraded' };
   }
@@ -69,9 +75,10 @@ function statusOf(state: AppState, zh: boolean): { tone: string; label: string }
 
 export function App() {
   const [state, setState] = useState<AppState | null>(null);
-  const [view, setView] = useState<View>('overview');
+  const [view, setView] = useState<View>('home');
   const [error, setError] = useState<string | null>(null);
   const isSettingsWindow = window.location.hash === '#settings';
+  const isRouterWindow = window.location.hash === '#router';
   const now = useNow(1000);
   const theme = state?.settings.theme ?? 'system';
   useTheme(theme);
@@ -111,6 +118,10 @@ export function App() {
     );
   }
 
+  if (isRouterWindow) {
+    return <RouterApp state={state} />;
+  }
+
   if (isSettingsWindow) {
     return <SettingsPage state={state} t={t} language={language} />;
   }
@@ -134,6 +145,11 @@ export function App() {
               <span className="status-dot" />
               {status.label}
             </span>
+            <IconButton
+              icon={Network}
+              label={language === 'zh-CN' ? 'AI 路由控制台' : 'AI Router console'}
+              onClick={() => void window.tokenMonitor.openRouterWindow()}
+            />
             <IconButton icon={Settings2} label={t('common.settings')} onClick={openSettings} />
             <IconButton icon={X} label={t('common.hide')} onClick={() => void window.tokenMonitor.hideWindow()} className="subtle" />
           </div>
@@ -142,7 +158,11 @@ export function App() {
         {!onboarding ? (
           <>
             <nav className="tabbar no-drag" aria-label="Main views">
-              <button type="button" className={`tab ${view === 'overview' ? 'active' : ''}`} onClick={() => setView('overview')}>
+              <button type="button" className={`tab ${view === 'home' ? 'active' : ''}`} onClick={() => setView('home')}>
+                <LayoutDashboard size={14} />
+                {t('tabs.home')}
+              </button>
+              <button type="button" className={`tab ${view === 'quota' ? 'active' : ''}`} onClick={() => setView('quota')}>
                 <Gauge size={14} />
                 {t('tabs.overview')}
               </button>
@@ -156,7 +176,10 @@ export function App() {
               </button>
             </nav>
             <div className="panel-scroll">
-              {view === 'overview' ? (
+              {view === 'home' ? (
+                <Home state={state} language={language} onOpenQuota={() => setView('quota')} />
+              ) : null}
+              {view === 'quota' ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <ProviderCard
                     state={state}
@@ -179,6 +202,24 @@ export function App() {
                         onRefresh={refresh}
                       />
                     ))}
+                  {state.router.quota.length > 0 ? (
+                    <div className="router-quota-section">
+                      <div className="router-quota-section-head">
+                        <span>{language === 'zh-CN' ? '路由提供商余量' : 'Router provider quota'}</span>
+                        <button type="button" className="home-link" onClick={() => void window.tokenMonitor.openRouterWindow()}>
+                          {language === 'zh-CN' ? '管理' : 'Manage'}
+                        </button>
+                      </div>
+                      {state.router.quota.map((quota) => (
+                        <RouterQuotaCard
+                          key={quota.providerId}
+                          quota={quota}
+                          language={language}
+                          onOpenRouter={() => void window.tokenMonitor.openRouterWindow()}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
                   <UnconnectedProviders
                     states={state.extraProviders.filter((provider) => !provider.configured)}
                     t={t}
