@@ -1,0 +1,46 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build renderer & main
+        run: npm run build
+
+      - name: Package macOS DMG
+        run: npx electron-builder --mac dmg --publish never
+        env:
+          # No Apple Developer certificate on CI; skip code signing.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TokenMonitor-macos-dmg
+          path: release/*.dmg
+          if-no-files-found: error
