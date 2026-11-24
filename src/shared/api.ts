@@ -3,18 +3,13 @@ import type {
   AppState,
   CredentialDetection,
   CredentialTestResult,
-  HistoryMetrics,
-  HistoryRange,
-  LocalUsageRange,
-  LocalUsageSummary,
   QuotaHistoryPoint,
-  SpeedConfigInfo,
-  SpeedRange,
-  SpeedSeries,
   UpdateSettingsPatch,
 } from './types';
 import type {
+  RouterActivityDay,
   RouterBalanceConfig,
+  RouterClientProviderFlow,
   RouterLogEntry,
   RouterLogPage,
   RouterLogQuery,
@@ -34,9 +29,6 @@ export interface TokenMonitorApi {
   getState(): Promise<AppState>;
   getAppInfo(): Promise<AppInfo>;
   refreshQuota(): Promise<AppState>;
-  refreshLocalUsage(range: LocalUsageRange): Promise<LocalUsageSummary>;
-  getSpeedSeries(range: SpeedRange): Promise<SpeedSeries>;
-  getHistoryMetrics(range: HistoryRange, force?: boolean): Promise<HistoryMetrics>;
   getQuotaHistory(hours: number): Promise<QuotaHistoryPoint[]>;
   getRouterState(): Promise<RouterState>;
   listRouterProviders(includeArchived?: boolean): Promise<RouterProvider[]>;
@@ -47,12 +39,16 @@ export interface TokenMonitorApi {
   saveRouterModel(input: RouterModelInput): Promise<RouterModelGroup[]>;
   archiveRouterModel(id: string, archived: boolean): Promise<RouterModelGroup[]>;
   deleteRouterModel(id: string): Promise<RouterModelGroup[]>;
+  renameRouterModelGroup(from: string, to: string): Promise<RouterModelGroup[]>;
+  setRouterModelGroupEnabled(publicName: string, enabled: boolean): Promise<RouterModelGroup[]>;
   getRouterServiceConfig(): Promise<RouterServiceConfig>;
   saveRouterServiceConfig(patch: Partial<RouterServiceConfig>): Promise<RouterState>;
   regenerateRouterApiKey(): Promise<RouterState>;
   getRouterBalance(): Promise<RouterBalanceConfig>;
   saveRouterBalance(patch: Partial<RouterBalanceConfig>): Promise<RouterState>;
   getRouterUsage(range: RouterUsageRange): Promise<RouterUsageOverview>;
+  getRouterActivity(days: number): Promise<RouterActivityDay[]>;
+  getRouterFlow(days: number): Promise<RouterClientProviderFlow[]>;
   getRouterLogs(query: RouterLogQuery): Promise<RouterLogPage>;
   getRouterLog(id: number): Promise<RouterLogEntry | null>;
   getRouterQuota(): Promise<RouterQuotaSnapshot[]>;
@@ -67,11 +63,6 @@ export interface TokenMonitorApi {
   clearCredential(): Promise<AppState>;
   setProviderSecret(providerId: string, secret: string): Promise<AppState>;
   clearProviderSecret(providerId: string): Promise<AppState>;
-  chooseLocalDb(): Promise<string | null>;
-  setSpeedEnabled(enabled: boolean): Promise<AppState>;
-  getSpeedConfig(): Promise<SpeedConfigInfo>;
-  testSpeedProxy(): Promise<{ ok: boolean; message: string }>;
-  clearSpeedSamples(): Promise<AppState>;
   clearQuotaHistory(): Promise<AppState>;
   openSettings(): Promise<void>;
   hideWindow(): Promise<void>;
@@ -86,9 +77,6 @@ export const IPC = {
   getState: 'app:get-state',
   getAppInfo: 'app:get-info',
   refreshQuota: 'quota:refresh',
-  refreshLocalUsage: 'local:refresh',
-  getSpeedSeries: 'speed:series',
-  getHistoryMetrics: 'speed:history-metrics',
   getQuotaHistory: 'quota:history',
   getRouterState: 'router:get-state',
   listRouterProviders: 'router:list-providers',
@@ -99,12 +87,16 @@ export const IPC = {
   saveRouterModel: 'router:save-model',
   archiveRouterModel: 'router:archive-model',
   deleteRouterModel: 'router:delete-model',
+  renameRouterModelGroup: 'router:rename-model-group',
+  setRouterModelGroupEnabled: 'router:set-model-group-enabled',
   getRouterServiceConfig: 'router:get-service',
   saveRouterServiceConfig: 'router:save-service',
   regenerateRouterApiKey: 'router:regenerate-key',
   getRouterBalance: 'router:get-balance',
   saveRouterBalance: 'router:save-balance',
   getRouterUsage: 'router:get-usage',
+  getRouterActivity: 'router:get-activity',
+  getRouterFlow: 'router:get-flow',
   getRouterLogs: 'router:get-logs',
   getRouterLog: 'router:get-log',
   getRouterQuota: 'router:get-quota',
@@ -119,11 +111,6 @@ export const IPC = {
   clearCredential: 'credentials:clear',
   setProviderSecret: 'providers:set-secret',
   clearProviderSecret: 'providers:clear-secret',
-  chooseLocalDb: 'local:choose-db',
-  setSpeedEnabled: 'speed:set-enabled',
-  getSpeedConfig: 'speed:get-config',
-  testSpeedProxy: 'speed:test',
-  clearSpeedSamples: 'speed:clear-samples',
   clearQuotaHistory: 'quota:clear-history',
   openSettings: 'window:open-settings',
   hideWindow: 'window:hide',

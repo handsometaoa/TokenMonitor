@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Activity, Database, Gauge, LayoutDashboard, Network, RefreshCw, Settings2, X } from 'lucide-react';
+import { EyeOff, Gauge, LayoutDashboard, Network, RefreshCw, Settings2, X } from 'lucide-react';
 import type { AppState } from '../../shared/types';
+import { agentQuotaKey, routerQuotaIdentity } from '../../shared/types';
 import { BrandMark } from './components/Logo';
 import { ExtraProviderCard, UnconnectedProviders } from './components/ExtraProviderCard';
 import { ProviderCard } from './components/ProviderCard';
@@ -11,13 +12,11 @@ import { createTranslator } from './i18n';
 import { formatRelative } from './format';
 import { useNow, useTheme } from './hooks';
 import { Home } from './views/Home';
-import { LocalUsage } from './views/LocalUsage';
 import { Onboarding } from './views/Onboarding';
 import { SettingsPage } from './views/Settings';
-import { Speed } from './views/Speed';
 import { RouterApp } from './router/RouterApp';
 
-type View = 'home' | 'quota' | 'local' | 'speed';
+type View = 'home' | 'quota';
 
 function Splash() {
   return (
@@ -131,6 +130,24 @@ export function App() {
   const onboarding = !state.settings.onboardingCompleted && !state.credentials.configured;
   const status = statusOf(state, language === 'zh-CN');
 
+  // Per-agent visibility for the quota tab; same setting drives the overview rows and the tray.
+  const quotaVisibility = state.settings.quotaVisibility;
+  const quotaVisible = (providerId: string) => quotaVisibility[agentQuotaKey(providerId)] !== false;
+  const toggleQuotaVisibility = (key: string) => {
+    void window.tokenMonitor.updateSettings({ quotaVisibility: { [key]: quotaVisibility[key] === false } });
+  };
+  const zh = language === 'zh-CN';
+  const visibleExtraProviders = state.extraProviders.filter(
+    (provider) => (provider.snapshot || provider.configured) && quotaVisible(provider.providerId),
+  );
+  const hiddenQuotaAgents = new Map<string, string>();
+  if (state.quota.snapshot && !quotaVisible('opencode')) hiddenQuotaAgents.set(agentQuotaKey('opencode'), 'OpenCode Go');
+  for (const provider of state.extraProviders) {
+    if (!quotaVisible(provider.providerId) && !hiddenQuotaAgents.has(agentQuotaKey(provider.providerId))) {
+      hiddenQuotaAgents.set(agentQuotaKey(provider.providerId), provider.providerName);
+    }
+  }
+
   return (
     <div className="app-bg">
       <div className="panel-shell">
@@ -166,14 +183,6 @@ export function App() {
                 <Gauge size={14} />
                 {t('tabs.overview')}
               </button>
-              <button type="button" className={`tab ${view === 'local' ? 'active' : ''}`} onClick={() => setView('local')}>
-                <Database size={14} />
-                {t('tabs.local')}
-              </button>
-              <button type="button" className={`tab ${view === 'speed' ? 'active' : ''}`} onClick={() => setView('speed')}>
-                <Activity size={14} />
-                {t('tabs.speed')}
-              </button>
             </nav>
             <div className="panel-scroll">
               {view === 'home' ? (
@@ -181,27 +190,29 @@ export function App() {
               ) : null}
               {view === 'quota' ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <ProviderCard
-                    state={state}
-                    now={now}
-                    language={language}
-                    t={t}
-                    onRetry={refresh}
-                    onOpenSettings={openSettings}
-                  />
-                  {state.extraProviders
-                    .filter((provider) => provider.snapshot || provider.configured)
-                    .map((provider) => (
-                      <ExtraProviderCard
-                        key={provider.providerId}
-                        state={provider}
-                        now={now}
-                        language={language}
-                        t={t}
-                        onOpenSettings={openSettings}
-                        onRefresh={refresh}
-                      />
-                    ))}
+                  {quotaVisible('opencode') ? (
+                    <ProviderCard
+                      state={state}
+                      now={now}
+                      language={language}
+                      t={t}
+                      onRetry={refresh}
+                      onOpenSettings={openSettings}
+                      onHide={() => toggleQuotaVisibility(agentQuotaKey('opencode'))}
+                    />
+                  ) : null}
+                  {visibleExtraProviders.map((provider) => (
+                    <ExtraProviderCard
+                      key={provider.providerId}
+                      state={provider}
+                      now={now}
+                      language={language}
+                      t={t}
+                      onOpenSettings={openSettings}
+                      onRefresh={refresh}
+                      onHide={() => toggleQuotaVisibility(agentQuotaKey(provider.providerId))}
+                    />
+                  ))}
                   {state.router.quota.length > 0 ? (
                     <div className="router-quota-section">
                       <div className="router-quota-section-head">
@@ -210,18 +221,20 @@ export function App() {
                           {language === 'zh-CN' ? '管理' : 'Manage'}
                         </button>
                       </div>
-                      {state.router.quota.map((quota) => (
-                        <RouterQuotaCard
-                          key={quota.providerId}
-                          quota={quota}
-                          language={language}
-                          onOpenRouter={() => void window.tokenMonitor.openRouterWindow()}
-                        />
-                      ))}
+                      {state.router.quota
+                        .filter((quota) => quotaVisibility[routerQuotaIdentity(quota.providerId, quota.strategyId)] !== false)
+                        .map((quota) => (
+                          <RouterQuotaCard
+                            key={quota.providerId}
+                            quota={quota}
+                            language={language}
+                            onOpenRouter={() => void window.tokenMonitor.openRouterWindow()}
+                          />
+                        ))}
                     </div>
                   ) : null}
                   <UnconnectedProviders
-                    states={state.extraProviders.filter((provider) => !provider.configured)}
+                    states={state.extraProviders.filter((provider) => !provider.configured && quotaVisible(provider.providerId))}
                     t={t}
                     onOpenSettings={openSettings}
                   />
@@ -230,13 +243,24 @@ export function App() {
                     language={language}
                     onOpenExternal={(url) => void window.tokenMonitor.openExternal(url)}
                   />
+                  {hiddenQuotaAgents.size > 0 ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', padding: '0 2px' }}>
+                      <span className="hint" style={{ margin: 0 }}>{zh ? '已隐藏：' : 'Hidden:'}</span>
+                      {[...hiddenQuotaAgents.entries()].map(([key, name]) => (
+                        <button
+                          type="button"
+                          key={key}
+                          className="home-hidden-chip"
+                          title={zh ? '点击恢复显示' : 'Click to show again'}
+                          onClick={() => toggleQuotaVisibility(key)}
+                        >
+                          <EyeOff size={11} />
+                          {name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-              {view === 'local' ? (
-                <LocalUsage state={state} language={language} t={t} onOpenSettings={openSettings} />
-              ) : null}
-              {view === 'speed' ? (
-                <Speed state={state} language={language} t={t} onOpenSettings={openSettings} />
               ) : null}
             </div>
             <footer className="panel-footer">

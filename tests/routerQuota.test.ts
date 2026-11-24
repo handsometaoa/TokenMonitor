@@ -94,6 +94,126 @@ describe('router quota strategies', () => {
     expect(snapshot.currency).toBe('USD');
   });
 
+  it('parses MiniMax interval and weekly windows', async () => {
+    const snapshot = await executeQuotaStrategy(
+      'minimax',
+      providerRow({ quotaStrategyId: 'minimax', kind: 'custom' }),
+      'sk-test',
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              current_interval_usage_count: 30,
+              current_interval_total_count: 100,
+              current_weekly_usage_count: 200,
+              current_weekly_total_count: 1000,
+              points_balance: 50,
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    expect(snapshot.error).toBeNull();
+    expect(snapshot.windows).toHaveLength(2);
+    expect(snapshot.windows[0]).toMatchObject({ id: 'interval', usedPercent: 30, windowMinutes: 300 });
+    expect(snapshot.windows[1]).toMatchObject({ id: 'weekly', usedPercent: 20, windowMinutes: 10_080 });
+    expect(snapshot.balance).toBe(50);
+  });
+
+  it('parses ElevenLabs character quota', async () => {
+    const snapshot = await executeQuotaStrategy(
+      'elevenlabs',
+      providerRow({ quotaStrategyId: 'elevenlabs', kind: 'custom' }),
+      'sk-test',
+      async () =>
+        new Response(JSON.stringify({ character_count: 400, character_limit: 1000, tier: 'creator' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    expect(snapshot.error).toBeNull();
+    expect(snapshot.windows[0]).toMatchObject({ id: 'characters', usedPercent: 40 });
+    expect(snapshot.details[0]).toEqual({ label: '套餐', value: 'creator' });
+  });
+
+  it('parses xAI management balance from cents', async () => {
+    const snapshot = await executeQuotaStrategy(
+      'xai',
+      providerRow({ quotaStrategyId: 'xai', kind: 'xai', strategyConfig: { XAI_TEAM_ID: 'team-1' } }),
+      'sk-test',
+      async () =>
+        new Response(JSON.stringify({ total: { val: '-1234' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    expect(snapshot.error).toBeNull();
+    expect(snapshot.balance).toBe(12.34);
+    expect(snapshot.currency).toBe('USD');
+  });
+
+  it('parses a self-hosted LiteLLM budget', async () => {
+    const snapshot = await executeQuotaStrategy(
+      'litellm',
+      providerRow({ quotaStrategyId: 'litellm', kind: 'custom', baseUrl: 'https://gateway.example.com' }),
+      'sk-test',
+      async (input) => {
+        expect(input).toBe('https://gateway.example.com/key/info');
+        return new Response(JSON.stringify({ info: { spend: 2, max_budget: 10 } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      },
+    );
+    expect(snapshot.error).toBeNull();
+    expect(snapshot.windows[0]).toMatchObject({ id: 'budget', usedPercent: 20 });
+    expect(snapshot.balance).toBe(8);
+  });
+
+  it('parses a custom HTTP quota config', async () => {
+    const snapshot = await executeQuotaStrategy(
+      'custom-http',
+      providerRow({
+        quotaStrategyId: 'custom-http',
+        strategyConfig: {
+          url: 'https://api.example.com/quota',
+          percentPath: 'data.usedPercent',
+          balancePath: 'data.balance',
+          currency: 'USD',
+          label: 'Weekly',
+          windowMinutes: '10080',
+        },
+      }),
+      'sk-test',
+      async () =>
+        new Response(JSON.stringify({ data: { usedPercent: 42, balance: 3.5 } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    expect(snapshot.error).toBeNull();
+    expect(snapshot.windows[0]).toMatchObject({ id: 'custom', label: 'Weekly', usedPercent: 42, windowMinutes: 10080 });
+    expect(snapshot.balance).toBe(3.5);
+  });
+
+  it('runs an external Custom JS strategy', async () => {
+    const snapshot = await executeQuotaStrategy(
+      'custom-js',
+      providerRow({
+        quotaStrategyId: 'custom-js',
+        strategyConfig: {
+          script:
+            "return { windows: [{ id: 'js', label: 'JS', usedPercent: 12, resetsAt: null, windowMinutes: 10080 }], balance: null, currency: null, details: [{ label: 'source', value: 'script' }] };",
+        },
+      }),
+      'sk-test',
+      async () => new Response('{}', { status: 200 }),
+    );
+    expect(snapshot.error).toBeNull();
+    expect(snapshot.windows[0]).toMatchObject({ id: 'js', usedPercent: 12, windowMinutes: 10080 });
+    expect(snapshot.details[0]).toEqual({ label: 'source', value: 'script' });
+  });
+
   it('returns a readable error instead of throwing', async () => {
     const snapshot = await executeQuotaStrategy(
       'opencode',

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Archive, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { Archive, Pencil, Plus, Power, RotateCcw, TextCursorInput, Trash2 } from 'lucide-react';
 import type { RouterModelGroup, RouterModelInput, RouterProvider } from '../../../../shared/routerTypes';
 import { RouterBadge, RouterModal, Field } from '../components';
 
@@ -24,6 +24,7 @@ export function Models({
   const [includeArchived, setIncludeArchived] = useState(false);
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<FormState | null>(null);
+  const [renaming, setRenaming] = useState<{ from: string; to: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -92,6 +93,26 @@ export function Models({
     if (!window.confirm('删除这条模型渠道？')) return;
     await window.tokenMonitor.deleteRouterModel(id);
     await reload();
+  };
+
+  const toggleGroup = async (group: RouterModelGroup) => {
+    await window.tokenMonitor.setRouterModelGroupEnabled(group.publicName, group.enabledCount === 0);
+    await reload();
+  };
+
+  const saveRename = async () => {
+    if (!renaming || !renaming.to.trim()) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await window.tokenMonitor.renameRouterModelGroup(renaming.from, renaming.to.trim());
+      setRenaming(null);
+      await reload();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '重命名失败');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -165,6 +186,26 @@ export function Models({
                   </td>
                   <td>
                     <div className="router-row-actions">
+                      {index === 0 ? (
+                        <>
+                          <button
+                            type="button"
+                            className="router-icon-btn"
+                            title="重命名模型组"
+                            onClick={() => setRenaming({ from: group.publicName, to: group.publicName })}
+                          >
+                            <TextCursorInput size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="router-icon-btn"
+                            title={group.enabledCount > 0 ? '停用整个模型组' : '启用整个模型组'}
+                            onClick={() => void toggleGroup(group)}
+                          >
+                            <Power size={14} />
+                          </button>
+                        </>
+                      ) : null}
                       <button
                         type="button"
                         className="router-icon-btn"
@@ -207,6 +248,33 @@ export function Models({
           </tbody>
         </table>
       </div>
+
+      {renaming ? (
+        <RouterModal
+          title="重命名模型组"
+          subtitle="会同时修改该对外模型名下的全部渠道，并同步请求日志；历史用量保留原名称快照。"
+          onClose={() => setRenaming(null)}
+          footer={
+            <>
+              <button type="button" className="router-btn" onClick={() => setRenaming(null)} disabled={busy}>
+                取消
+              </button>
+              <button type="button" className="router-btn primary" onClick={() => void saveRename()} disabled={busy || !renaming.to.trim()}>
+                {busy ? '保存中…' : '重命名'}
+              </button>
+            </>
+          }
+        >
+          <Field label="新的对外模型名">
+            <input
+              className="router-input mono"
+              value={renaming.to}
+              onChange={(event) => setRenaming({ ...renaming, to: event.target.value })}
+              autoFocus
+            />
+          </Field>
+        </RouterModal>
+      ) : null}
 
       {editing ? (
         <RouterModal

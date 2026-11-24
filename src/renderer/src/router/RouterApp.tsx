@@ -179,7 +179,7 @@ export function RouterApp({ state }: { state: AppState }) {
           {page === 'service' ? <ServicePage state={router} onChanged={() => void reload()} /> : null}
           {page === 'logs' ? <Logs onError={setError} /> : null}
           {page === 'usage' ? <Usage onError={setError} /> : null}
-          {page === 'quota' ? <Quota quota={router.quota} onRefresh={refreshQuota} /> : null}
+          {page === 'quota' ? <Quota quota={router.quota} state={state} onRefresh={refreshQuota} /> : null}
           {page === 'settings' ? <RouterSettings state={router} onChanged={() => void reload()} /> : null}
         </div>
       </main>

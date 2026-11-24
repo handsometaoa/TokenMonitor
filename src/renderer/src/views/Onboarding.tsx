@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Check, Database, ExternalLink, KeyRound, ShieldCheck } from 'lucide-react';
+import { Check, ExternalLink, KeyRound, ShieldCheck } from 'lucide-react';
 import type { AppState, CredentialDetection, CredentialTestResult } from '../../../shared/types';
 import type { Translator } from '../i18n';
-import { Banner, Spinner, Toggle } from '../components/ui';
+import { Banner, Spinner } from '../components/ui';
 
 export function Onboarding({
   state,
@@ -18,26 +18,6 @@ export function Onboarding({
   const [busy, setBusy] = useState<'detect' | 'use' | 'save' | null>(null);
   const [detection, setDetection] = useState<CredentialDetection | null>(null);
   const [result, setResult] = useState<CredentialTestResult | null>(null);
-  const [localEnabled, setLocalEnabled] = useState(state.settings.localUsageEnabled);
-  const [localFound, setLocalFound] = useState<boolean | null>(null);
-  const [localPath, setLocalPath] = useState('');
-
-  useEffect(() => {
-    let cancelled = false;
-    void window.tokenMonitor
-      .refreshLocalUsage('all')
-      .then((summary) => {
-        if (cancelled) return;
-        setLocalFound(Boolean(summary.dbPath && summary.source !== 'none'));
-        setLocalPath(summary.dbPath);
-      })
-      .catch(() => {
-        if (!cancelled) setLocalFound(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const detect = async () => {
     setBusy('detect');
@@ -86,13 +66,7 @@ export function Onboarding({
   const skip = async () => {
     await window.tokenMonitor.updateSettings({
       onboardingCompleted: true,
-      localUsageEnabled: localEnabled,
     });
-  };
-
-  const toggleLocal = async (next: boolean) => {
-    setLocalEnabled(next);
-    await window.tokenMonitor.updateSettings({ localUsageEnabled: next });
   };
 
   return (
@@ -187,17 +161,6 @@ export function Onboarding({
           <span className="step-title">{t('onboarding.step2')}</span>
         </div>
         <div className="hint" style={{ marginBottom: 10 }}>{t('onboarding.step2Body')}</div>
-        <div className="switch-row" style={{ padding: '4px 0', borderTop: 0 }}>
-          <div className="switch-copy">
-            <strong>{t('onboarding.enableLocal')}</strong>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <Database size={11} />
-              {localFound === null ? t('common.loading') : localFound ? t('onboarding.localFound') : t('onboarding.localNotFound')}
-            </span>
-            {localPath ? <span className="mono" style={{ wordBreak: 'break-all', display: 'block', marginTop: 3, fontSize: 9.5 }}>{localPath}</span> : null}
-          </div>
-          <Toggle checked={localEnabled} onChange={(next) => void toggleLocal(next)} label={t('onboarding.enableLocal')} />
-        </div>
       </section>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 16 }}>

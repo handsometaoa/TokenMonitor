@@ -3,7 +3,9 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type {
+  RouterActivityDay,
   RouterBalanceConfig,
+  RouterClientProviderFlow,
   RouterLogEntry,
   RouterLogPage,
   RouterLogQuery,
@@ -22,7 +24,7 @@ import type {
 } from '../../shared/routerTypes';
 import { DEFAULT_ROUTER_BALANCE, DEFAULT_ROUTER_PORT } from '../../shared/routerTypes';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export interface RouterProviderRow {
   id: string;
@@ -89,6 +91,7 @@ interface LogDbRow {
   path: string;
   status: number | null;
   duration_ms: number | null;
+  ttft_ms: number | null;
   stream: number;
   prompt_tokens: number;
   completion_tokens: number;
@@ -111,6 +114,8 @@ const EMPTY_TOTALS: RouterUsageTotals = {
   successCount: 0,
   failCount: 0,
   durationMs: 0,
+  ttftMs: 0,
+  ttftSamples: 0,
   promptTokens: 0,
   completionTokens: 0,
   reasoningTokens: 0,
@@ -156,6 +161,8 @@ function addTotals(target: RouterUsageTotals, source: RouterUsageTotals): void {
   target.successCount += source.successCount;
   target.failCount += source.failCount;
   target.durationMs += source.durationMs;
+  target.ttftMs += source.ttftMs;
+  target.ttftSamples += source.ttftSamples;
   target.promptTokens += source.promptTokens;
   target.completionTokens += source.completionTokens;
   target.reasoningTokens += source.reasoningTokens;
@@ -190,6 +197,18 @@ export class RouterRepository {
   private migrate(): void {
     const version = Number((this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version ?? 0);
     if (version >= SCHEMA_VERSION) return;
+    if (version === 1) {
+      // v1 → v2: add TTFT columns to existing tables.
+      this.db.exec(`
+        ALTER TABLE request_logs ADD COLUMN ttft_ms INTEGER;
+        ALTER TABLE usage_daily ADD COLUMN ttft_ms INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE usage_daily ADD COLUMN ttft_samples INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE usage_hourly ADD COLUMN ttft_ms INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE usage_hourly ADD COLUMN ttft_samples INTEGER NOT NULL DEFAULT 0;
+        PRAGMA user_version = ${SCHEMA_VERSION};
+      `);
+      return;
+    }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS providers (
         id TEXT PRIMARY KEY,
@@ -239,6 +258,7 @@ export class RouterRepository {
         path TEXT NOT NULL,
         status INTEGER,
         duration_ms INTEGER,
+        ttft_ms INTEGER,
         stream INTEGER NOT NULL DEFAULT 0,
         prompt_tokens INTEGER NOT NULL DEFAULT 0,
         completion_tokens INTEGER NOT NULL DEFAULT 0,
@@ -268,6 +288,8 @@ export class RouterRepository {
         success_count INTEGER NOT NULL DEFAULT 0,
         fail_count INTEGER NOT NULL DEFAULT 0,
         duration_ms INTEGER NOT NULL DEFAULT 0,
+        ttft_ms INTEGER NOT NULL DEFAULT 0,
+        ttft_samples INTEGER NOT NULL DEFAULT 0,
         prompt_tokens INTEGER NOT NULL DEFAULT 0,
         completion_tokens INTEGER NOT NULL DEFAULT 0,
         reasoning_tokens INTEGER NOT NULL DEFAULT 0,
@@ -288,6 +310,8 @@ export class RouterRepository {
         success_count INTEGER NOT NULL DEFAULT 0,
         fail_count INTEGER NOT NULL DEFAULT 0,
         duration_ms INTEGER NOT NULL DEFAULT 0,
+        ttft_ms INTEGER NOT NULL DEFAULT 0,
+        ttft_samples INTEGER NOT NULL DEFAULT 0,
         prompt_tokens INTEGER NOT NULL DEFAULT 0,
         completion_tokens INTEGER NOT NULL DEFAULT 0,
         reasoning_tokens INTEGER NOT NULL DEFAULT 0,
@@ -331,12 +355,13 @@ export class RouterRepository {
           port: Number(parsed.port) || DEFAULT_ROUTER_PORT,
           apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey : '',
           proxyUrl: typeof parsed.proxyUrl === 'string' ? parsed.proxyUrl : '',
+          captureBodies: parsed.captureBodies !== false,
         };
       } catch {
         // Fall through to defaults.
       }
     }
-    return { enabled: false, port: DEFAULT_ROUTER_PORT, apiKey: '', proxyUrl: '' };
+    return { enabled: false, port: DEFAULT_ROUTER_PORT, apiKey: '', proxyUrl: '', captureBodies: true };
   }
 
   setServiceConfig(config: RouterServiceConfig): void {
@@ -524,6 +549,24 @@ export class RouterRepository {
     this.db.prepare('UPDATE models SET archived_at = ? WHERE id = ?').run(archived ? Date.now() : null, id);
   }
 
+  renameModelGroup(from: string, to: string): void {
+    const target = this.db.prepare('SELECT count(*) AS n FROM models WHERE public_name = ?').get(to) as { n: number };
+    if (Number(target.n) > 0) throw new Error('目标模型名已存在');
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare('UPDATE models SET public_name = ? WHERE public_name = ?').run(to, from);
+      this.db.prepare('UPDATE request_logs SET public_model = ? WHERE public_model = ?').run(to, from);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  setModelGroupEnabled(publicName: string, enabled: boolean): void {
+    this.db.prepare('UPDATE models SET enabled = ? WHERE public_name = ?').run(enabled ? 1 : 0, publicName);
+  }
+
   deleteModel(id: string): void {
     this.db.prepare('DELETE FROM models WHERE id = ?').run(id);
   }
@@ -615,6 +658,7 @@ export class RouterRepository {
     requestId: string;
     status: number;
     stream: boolean;
+    ttftMs?: number | null;
     promptTokens: number;
     completionTokens: number;
     reasoningTokens: number;
@@ -633,9 +677,10 @@ export class RouterRepository {
     if (!row) return;
     const finishedAt = Date.now();
     const durationMs = Math.max(0, finishedAt - row.started_at);
+    const ttftMs = input.ttftMs != null ? Math.max(0, Math.round(input.ttftMs)) : null;
     this.db
       .prepare(`
-        UPDATE request_logs SET finished_at = ?, status = ?, duration_ms = ?, stream = ?,
+        UPDATE request_logs SET finished_at = ?, status = ?, duration_ms = ?, ttft_ms = ?, stream = ?,
           prompt_tokens = ?, completion_tokens = ?, reasoning_tokens = ?, cache_read_tokens = ?,
           cache_write_tokens = ?, unrecognized_tokens = ?, total_tokens = ?,
           response_body = ?, response_headers = ?, error = ?, retry_trace = ?, aggregated = 1
@@ -645,6 +690,7 @@ export class RouterRepository {
         finishedAt,
         input.status,
         durationMs,
+        ttftMs,
         input.stream ? 1 : 0,
         input.promptTokens,
         input.completionTokens,
@@ -667,6 +713,8 @@ export class RouterRepository {
       successCount: success ? 1 : 0,
       failCount: success ? 0 : 1,
       durationMs,
+      ttftMs: ttftMs ?? 0,
+      ttftSamples: ttftMs != null ? 1 : 0,
       promptTokens: success ? input.promptTokens : 0,
       completionTokens: success ? input.completionTokens : 0,
       reasoningTokens: success ? input.reasoningTokens : 0,
@@ -697,15 +745,17 @@ export class RouterRepository {
         .prepare(`
           INSERT INTO ${table} (
             ${keyColumn}, provider_name, public_model, provider_id, model_id,
-            request_count, success_count, fail_count, duration_ms,
+            request_count, success_count, fail_count, duration_ms, ttft_ms, ttft_samples,
             prompt_tokens, completion_tokens, reasoning_tokens, cache_read_tokens,
             cache_write_tokens, unrecognized_tokens, total_tokens
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(${keyColumn}, provider_name, public_model) DO UPDATE SET
             request_count = request_count + excluded.request_count,
             success_count = success_count + excluded.success_count,
             fail_count = fail_count + excluded.fail_count,
             duration_ms = duration_ms + excluded.duration_ms,
+            ttft_ms = ttft_ms + excluded.ttft_ms,
+            ttft_samples = ttft_samples + excluded.ttft_samples,
             prompt_tokens = prompt_tokens + excluded.prompt_tokens,
             completion_tokens = completion_tokens + excluded.completion_tokens,
             reasoning_tokens = reasoning_tokens + excluded.reasoning_tokens,
@@ -724,6 +774,8 @@ export class RouterRepository {
           totals.successCount,
           totals.failCount,
           totals.durationMs,
+          totals.ttftMs,
+          totals.ttftSamples,
           totals.promptTokens,
           totals.completionTokens,
           totals.reasoningTokens,
@@ -822,6 +874,7 @@ export class RouterRepository {
       path: row.path,
       status: row.status,
       durationMs: row.duration_ms,
+      ttftMs: row.ttft_ms,
       stream: Boolean(row.stream),
       promptTokens: row.prompt_tokens,
       completionTokens: row.completion_tokens,
@@ -866,6 +919,8 @@ export class RouterRepository {
         successCount: Number(row.success_count) || 0,
         failCount: Number(row.fail_count) || 0,
         durationMs: Number(row.duration_ms) || 0,
+        ttftMs: Number(row.ttft_ms) || 0,
+        ttftSamples: Number(row.ttft_samples) || 0,
         promptTokens: Number(row.prompt_tokens) || 0,
         completionTokens: Number(row.completion_tokens) || 0,
         reasoningTokens: Number(row.reasoning_tokens) || 0,
@@ -936,6 +991,60 @@ export class RouterRepository {
       totalTokens: keys.map((key) => buckets.get(key)?.totalTokens ?? 0),
       cacheTokens: keys.map((key) => buckets.get(key)?.cacheReadTokens ?? 0),
     };
+  }
+
+  getUsageActivity(days: number): RouterActivityDay[] {
+    const span = Math.min(90, Math.max(1, Math.floor(Number(days)) || 1));
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - (span - 1));
+    const startKey = localDayKey(start.getTime());
+    const rows = this.db
+      .prepare(`
+        SELECT date, SUM(request_count) AS request_count, SUM(total_tokens) AS total_tokens
+        FROM usage_daily WHERE date >= ? GROUP BY date
+      `)
+      .all(startKey) as unknown as Array<{ date: string; request_count: number; total_tokens: number }>;
+    const buckets = new Map<string, { requestCount: number; totalTokens: number }>();
+    for (const row of rows) {
+      buckets.set(row.date, {
+        requestCount: Number(row.request_count) || 0,
+        totalTokens: Number(row.total_tokens) || 0,
+      });
+    }
+    const result: RouterActivityDay[] = [];
+    const cursor = new Date(start);
+    for (let index = 0; index < span; index += 1) {
+      const key = localDayKey(cursor.getTime());
+      const bucket = buckets.get(key);
+      result.push({ date: key, requestCount: bucket?.requestCount ?? 0, totalTokens: bucket?.totalTokens ?? 0 });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return result;
+  }
+
+  getClientProviderFlow(days: number): RouterClientProviderFlow[] {
+    // Request logs are retained for 7 days, so the flow window is capped there.
+    const span = Math.min(7, Math.max(1, Math.floor(Number(days)) || 1));
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - (span - 1));
+    const cutoff = localDayKey(start.getTime());
+    const rows = this.db
+      .prepare(`
+        SELECT COALESCE(NULLIF(client, ''), 'unknown') AS client_key, provider_name, count(*) AS request_count
+        FROM request_logs WHERE log_date >= ?
+        GROUP BY 1, 2
+        ORDER BY request_count DESC, 1, 2
+      `)
+      .all(cutoff) as unknown as Array<{ client_key: string; provider_name: string; request_count: number }>;
+    return rows
+      .map((row) => ({
+        client: String(row.client_key),
+        providerName: String(row.provider_name),
+        requestCount: Number(row.request_count) || 0,
+      }))
+      .filter((row) => row.requestCount > 0);
   }
 
   saveQuotaSnapshot(input: {

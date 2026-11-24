@@ -336,9 +336,13 @@ export function Providers({
                 ))}
               </select>
             </Field>
-            <Field label="策略附加配置" hint="JSON，例如 cookie / region / organizationId">
-              <input
+            <Field
+              label="策略附加配置"
+              hint="JSON；Custom HTTP 支持 url / auth / headers / percentPath / usedPath / limitPath / balancePath / currency / windowMinutes"
+            >
+              <textarea
                 className="router-input mono"
+                style={{ height: 64, padding: '7px 10px', resize: 'vertical' }}
                 value={editing.strategyConfig}
                 onChange={(event) => setEditing({ ...editing, strategyConfig: event.target.value })}
               />

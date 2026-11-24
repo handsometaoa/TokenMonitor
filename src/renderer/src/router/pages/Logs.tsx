@@ -2,6 +2,19 @@ import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, Search } from 'lucide-react';
 import type { RouterLogEntry, RouterLogPage } from '../../../../shared/routerTypes';
 import { RouterBadge, RouterModal, formatRouterDuration, formatRouterTime, statusTone } from '../components';
+import { CodeViewer } from '../CodeViewer';
+
+function bodyLanguage(value: string | null): 'json' | 'plaintext' {
+  if (!value) return 'plaintext';
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return 'plaintext';
+  try {
+    JSON.parse(trimmed);
+    return 'json';
+  } catch {
+    return 'plaintext';
+  }
+}
 
 export function Logs({ onError }: { onError: (message: string) => void }) {
   const [page, setPage] = useState<RouterLogPage>({ items: [], total: 0 });
@@ -192,7 +205,7 @@ export function Logs({ onError }: { onError: (message: string) => void }) {
           </div>
           <div className="router-detail-section">
             <div className="router-detail-title">请求正文</div>
-            <pre className="router-pre">{selected.requestBody ?? '—'}</pre>
+            <CodeViewer value={selected.requestBody ?? '—'} language={bodyLanguage(selected.requestBody)} height={200} />
           </div>
           <div className="router-detail-section">
             <div className="router-detail-title">响应头</div>
@@ -200,7 +213,7 @@ export function Logs({ onError }: { onError: (message: string) => void }) {
           </div>
           <div className="router-detail-section">
             <div className="router-detail-title">响应正文</div>
-            <pre className="router-pre">{selected.responseBody ?? '—'}</pre>
+            <CodeViewer value={selected.responseBody ?? '—'} language={bodyLanguage(selected.responseBody)} height={200} />
           </div>
         </RouterModal>
       ) : null}

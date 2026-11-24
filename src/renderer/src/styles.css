@@ -1470,6 +1470,17 @@ a {
   margin-bottom: 9px;
 }
 
+/* Overview cards: shared padding + width guard so content never pokes past the card edge. */
+.home-quota-card,
+.home-health-card,
+.home-trend-card,
+.home-recent-card {
+  padding: 14px 16px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
 .home-section-title {
   font-size: 12px;
   font-weight: 680;
@@ -1512,8 +1523,9 @@ a {
 .home-quota-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
+  min-width: 0;
   padding: 8px 0;
   border: 0;
   border-top: 1px solid var(--border);
@@ -1521,7 +1533,6 @@ a {
   color: inherit;
   font: inherit;
   text-align: left;
-  cursor: pointer;
 }
 
 .home-quota-row:first-child {
@@ -1532,9 +1543,52 @@ a {
   background: var(--surface-3);
 }
 
+.home-quota-row:hover .home-quota-toggle {
+  opacity: 1;
+}
+
+.home-quota-toggle {
+  opacity: 0;
+  transition: opacity 120ms ease;
+  flex: 0 0 auto;
+}
+
 .home-quota-main {
   flex: 1;
   min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.home-quota-hidden {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.home-hidden-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.home-hidden-chip:hover {
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 .home-quota-name {
@@ -1804,4 +1858,60 @@ a {
   margin-top: 8px;
   font-size: 8.5px;
   color: var(--faint);
+}
+
+.home-health-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.home-health-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+
+.home-health-row:first-child {
+  border-top: 0;
+}
+
+.home-health-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.home-health-main strong {
+  display: block;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-health-main span {
+  display: block;
+  margin-top: 1px;
+  font-size: 9px;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-health-value {
+  font-size: 10.5px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.home-health-foot {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 9px;
+  color: var(--faint);
+  overflow-wrap: anywhere;
 }

@@ -1,8 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type {
+  RouterActivityDay,
   RouterBalanceConfig,
   RouterChannelHealth,
+  RouterClientProviderFlow,
   RouterLogEntry,
   RouterLogPage,
   RouterLogQuery,
@@ -182,6 +184,7 @@ export class RouterService extends EventEmitter {
       port: Number(patch.port ?? current.port),
       apiKey: patch.apiKey?.trim() || current.apiKey,
       proxyUrl: patch.proxyUrl !== undefined ? patch.proxyUrl.trim() : current.proxyUrl,
+      captureBodies: patch.captureBodies ?? current.captureBodies,
     };
     if (!Number.isInteger(next.port) || next.port < 1024 || next.port > 65_535) {
       throw new Error('端口必须是 1024-65535');
@@ -275,6 +278,22 @@ export class RouterService extends EventEmitter {
     return this.listModels(true);
   }
 
+  renameModelGroup(from: string, to: string): RouterModelGroup[] {
+    const source = from.trim();
+    const target = to.trim();
+    if (!source || !target) throw new Error('模型名不能为空');
+    if (source === target) return this.listModels(true);
+    this.repo.renameModelGroup(source, target);
+    this.emit('changed');
+    return this.listModels(true);
+  }
+
+  setModelGroupEnabled(publicName: string, enabled: boolean): RouterModelGroup[] {
+    this.repo.setModelGroupEnabled(publicName, enabled);
+    this.emit('changed');
+    return this.listModels(true);
+  }
+
   deleteModel(id: string): RouterModelGroup[] {
     this.repo.deleteModel(id);
     this.emit('changed');
@@ -305,6 +324,14 @@ export class RouterService extends EventEmitter {
 
   getUsage(range: RouterUsageRange): RouterUsageOverview {
     return this.repo.getUsage(range);
+  }
+
+  getUsageActivity(days: number): RouterActivityDay[] {
+    return this.repo.getUsageActivity(days);
+  }
+
+  getClientProviderFlow(days: number): RouterClientProviderFlow[] {
+    return this.repo.getClientProviderFlow(days);
   }
 
   getLogs(query: RouterLogQuery): RouterLogPage {

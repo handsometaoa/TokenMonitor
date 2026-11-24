@@ -8,21 +8,12 @@ import type {
   CredentialStatus,
   CredentialTestResult,
   ExtraProviderId,
-  HistoryMetrics,
-  HistoryRange,
-  LocalUsageRange,
-  LocalUsageSummary,
   QuotaHistoryPoint,
-  SpeedConfigInfo,
-  SpeedRange,
-  SpeedSeries,
   UpdateSettingsPatch,
 } from '../shared/types';
 import { EXTRA_PROVIDER_IDS } from '../shared/types';
 import { CredentialResolver } from './services/credentials';
 import { QuotaHistory } from './services/history';
-import { LocalUsageService } from './providers/opencodeGo/localUsage';
-import { SessionMetricsService } from './providers/opencodeGo/sessionMetrics';
 import type { FetchLike } from './providers/opencodeGo/api';
 import { ExtraProviderService } from './providers/extra/service';
 import { Logger } from './services/logger';
@@ -32,11 +23,11 @@ import { QuotaService } from './services/quotaService';
 import { SecretStore } from './services/secrets';
 import { ServiceStatusService } from './services/serviceStatus';
 import { SettingsStore } from './services/settings';
-import { SpeedManager } from './services/speedManager';
-import { SpeedStore } from './services/speedStore';
 import { RouterService } from './router/service';
 import type {
+  RouterActivityDay,
   RouterBalanceConfig,
+  RouterClientProviderFlow,
   RouterLogEntry,
   RouterLogPage,
   RouterLogQuery,
@@ -59,10 +50,6 @@ export class AppController extends EventEmitter {
   readonly credentials: CredentialResolver;
   readonly history: QuotaHistory;
   readonly quota: QuotaService;
-  readonly localUsage: LocalUsageService;
-  readonly sessionMetrics: SessionMetricsService;
-  readonly speed: SpeedManager;
-  readonly speedStore: SpeedStore;
   readonly extraSecrets: ProviderSecretStore;
   readonly extraProviders: ExtraProviderService;
   readonly serviceStatus: ServiceStatusService;
@@ -81,9 +68,6 @@ export class AppController extends EventEmitter {
     this.extraSecrets = new ProviderSecretStore(baseDir, this.logger);
     this.credentials = new CredentialResolver(this.settings, this.secrets, this.logger);
     this.history = new QuotaHistory(baseDir, this.logger);
-    this.speedStore = new SpeedStore(baseDir, this.logger);
-    this.localUsage = new LocalUsageService(this.settings, this.logger, demo);
-    this.sessionMetrics = new SessionMetricsService(this.settings, this.logger, demo);
     const notifier = new QuotaNotifierService(this.settings, showWindow, demo);
     this.quota = new QuotaService(
       this.settings,
@@ -94,7 +78,6 @@ export class AppController extends EventEmitter {
       demo,
       fetchImpl,
     );
-    this.speed = new SpeedManager(baseDir, this.settings, this.speedStore, this.logger, demo);
     this.extraProviders = new ExtraProviderService(this.settings, this.extraSecrets, this.logger, demo, fetchImpl);
     this.serviceStatus = new ServiceStatusService(fetchImpl, this.logger, demo);
     this.router = new RouterService(baseDir, this.logger, this.extraSecrets, fetchImpl, demo);
@@ -106,7 +89,6 @@ export class AppController extends EventEmitter {
       this.emit('state');
     });
     this.quota.on('changed', () => this.emit('state'));
-    this.speed.on('changed', () => this.emit('state'));
     this.extraProviders.on('changed', () => this.emit('state'));
     this.serviceStatus.on('changed', () => this.emit('state'));
   }
@@ -114,7 +96,6 @@ export class AppController extends EventEmitter {
   start(): void {
     nativeTheme.themeSource = this.settings.get().theme;
     this.applyLoginItem(this.settings.get());
-    void this.speed.start();
     void this.router.start();
     this.quota.start();
     this.extraProviders.start();
@@ -125,7 +106,6 @@ export class AppController extends EventEmitter {
     this.quota.stop();
     this.extraProviders.stop();
     this.serviceStatus.stop();
-    await this.speed.stop();
     await this.router.stop();
   }
 
@@ -154,7 +134,6 @@ export class AppController extends EventEmitter {
       quota: this.quota.getState(),
       extraProviders: this.extraProviders.getStates(),
       serviceStatuses: this.serviceStatus.getStatuses(),
-      speed: this.speed.getStatus(),
       router: this.router.getState(),
     };
   }
@@ -164,20 +143,8 @@ export class AppController extends EventEmitter {
     return this.getState();
   }
 
-  async getLocalUsage(range: LocalUsageRange): Promise<LocalUsageSummary> {
-    return this.localUsage.getSummary(range);
-  }
-
   async getQuotaHistory(hours: number): Promise<QuotaHistoryPoint[]> {
     return this.history.getPoints(hours);
-  }
-
-  async getSpeedSeries(range: SpeedRange): Promise<SpeedSeries> {
-    return this.speed.getSeries(range);
-  }
-
-  async getHistoryMetrics(range: HistoryRange, force = false): Promise<HistoryMetrics> {
-    return this.sessionMetrics.getMetrics(range, force);
   }
 
   updateSettings(patch: UpdateSettingsPatch): AppState {
@@ -190,10 +157,6 @@ export class AppController extends EventEmitter {
     if (refreshChanged) {
       this.quota.reconfigure();
       this.extraProviders.reconfigure();
-    }
-    if (before.localDataPath !== after.localDataPath) {
-      this.localUsage.clearCache();
-      this.sessionMetrics.clearCache();
     }
     if (before.launchAtLogin !== after.launchAtLogin) this.applyLoginItem(after);
     this.emit('state');
@@ -256,26 +219,6 @@ export class AppController extends EventEmitter {
     return this.getState();
   }
 
-  async setSpeedEnabled(enabled: boolean): Promise<AppState> {
-    await this.speed.setEnabled(enabled);
-    this.emit('state');
-    return this.getState();
-  }
-
-  getSpeedConfig(): SpeedConfigInfo {
-    return this.speed.getConfigInfo();
-  }
-
-  async testSpeedProxy(): Promise<{ ok: boolean; message: string }> {
-    return this.speed.test();
-  }
-
-  async clearSpeedSamples(): Promise<AppState> {
-    this.speed.clearSamples();
-    this.emit('state');
-    return this.getState();
-  }
-
   clearQuotaHistory(): AppState {
     this.history.clear();
     this.emit('state');
@@ -331,6 +274,14 @@ export class AppController extends EventEmitter {
     return this.router.deleteModel(id);
   }
 
+  renameRouterModelGroup(from: string, to: string): RouterModelGroup[] {
+    return this.router.renameModelGroup(from, to);
+  }
+
+  setRouterModelGroupEnabled(publicName: string, enabled: boolean): RouterModelGroup[] {
+    return this.router.setModelGroupEnabled(publicName, enabled);
+  }
+
   getRouterServiceConfig(): RouterServiceConfig {
     return this.router.getServiceConfig();
   }
@@ -353,6 +304,14 @@ export class AppController extends EventEmitter {
 
   getRouterUsage(range: RouterUsageRange): RouterUsageOverview {
     return this.router.getUsage(range);
+  }
+
+  getRouterActivity(days: number): RouterActivityDay[] {
+    return this.router.getUsageActivity(days);
+  }
+
+  getRouterFlow(days: number): RouterClientProviderFlow[] {
+    return this.router.getClientProviderFlow(days);
   }
 
   getRouterLogs(query: RouterLogQuery): RouterLogPage {

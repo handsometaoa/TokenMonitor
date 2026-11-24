@@ -1,6 +1,8 @@
 import { RefreshCw } from 'lucide-react';
+import type { AppState } from '../../../../shared/types';
 import type { RouterQuotaSnapshot } from '../../../../shared/routerTypes';
 import { RouterBadge, formatRouterTime } from '../components';
+import { SubscriptionCredentials } from '../../views/SubscriptionCredentials';
 
 function QuotaWindowRow({ window }: { window: RouterQuotaSnapshot['windows'][number] }) {
   const remaining = Math.max(0, 100 - window.usedPercent);
@@ -26,9 +28,11 @@ function QuotaWindowRow({ window }: { window: RouterQuotaSnapshot['windows'][num
 
 export function Quota({
   quota,
+  state,
   onRefresh,
 }: {
   quota: RouterQuotaSnapshot[];
+  state: AppState;
   onRefresh: () => void;
 }) {
   return (
@@ -87,6 +91,16 @@ export function Quota({
           ))}
         </div>
       )}
+
+      <div className="router-card">
+        <div className="router-card-head compact">
+          <div>
+            <div className="router-card-title">订阅额度监控</div>
+            <div className="router-card-sub">Codex / Claude / Cursor / Z.AI / ZCode 本机登录态检测与手动凭证</div>
+          </div>
+        </div>
+        <SubscriptionCredentials state={state} language="zh-CN" onChanged={onRefresh} />
+      </div>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { app, Menu, Tray, nativeImage, type MenuItemConstructorOptions } from 'electron';
 import { join } from 'node:path';
 import type { AppState, ProviderSnapshot } from '../shared/types';
+import { agentQuotaKey, routerQuotaIdentity } from '../shared/types';
 import type { AppController } from './appController';
 import type { WindowManager } from './windowManager';
 
@@ -65,15 +66,19 @@ export class TrayManager {
     const state = this.controller.getState();
     const language = state.settings.language;
     const zh = language === 'zh-CN';
+    const visibility = state.settings.quotaVisibility;
     const snapshot = state.quota.snapshot;
+    const showOpenCode = visibility[agentQuotaKey('opencode')] !== false;
     const items: MenuItemConstructorOptions[] = [];
 
-    items.push({
-      label: state.demo ? (zh ? 'OpenCode Go（演示数据）' : 'OpenCode Go (demo)') : 'OpenCode Go',
-      enabled: false,
-    });
+    if (showOpenCode) {
+      items.push({
+        label: state.demo ? (zh ? 'OpenCode Go（演示数据）' : 'OpenCode Go (demo)') : 'OpenCode Go',
+        enabled: false,
+      });
+    }
 
-    if (snapshot) {
+    if (showOpenCode && snapshot) {
       for (const window of snapshot.windows) {
         const value = state.settings.trayShowRemaining ? window.remainingPercent : window.usedPercent;
         const label = state.settings.trayShowRemaining ? (zh ? '剩余' : 'left') : zh ? '已用' : 'used';
@@ -88,7 +93,9 @@ export class TrayManager {
       items.push({ label: state.quota.error.message, enabled: false });
     }
 
-    const extraProviders = state.extraProviders.filter((provider) => provider.configured);
+    const extraProviders = state.extraProviders.filter(
+      (provider) => provider.configured && visibility[agentQuotaKey(provider.providerId)] !== false,
+    );
     if (extraProviders.length) {
       items.push({ type: 'separator' });
       for (const provider of extraProviders) {
@@ -107,6 +114,22 @@ export class TrayManager {
             : `${zh ? '最低剩余' : 'lowest left'} ${Math.round(remaining)}%`;
         items.push({
           label: `${provider.providerName} · ${suffix}`,
+          enabled: false,
+        });
+      }
+    }
+    for (const quota of (state.settings.trayShowRouterQuota ? state.router.quota : []).filter(
+      (quota) => visibility[routerQuotaIdentity(quota.providerId, quota.strategyId)] !== false,
+    )) {
+      if (quota.windows.length > 0) {
+        const remaining = Math.min(...quota.windows.map((window) => Math.max(0, 100 - window.usedPercent)));
+        items.push({
+          label: `${quota.providerName} · ${zh ? '最低剩余' : 'lowest left'} ${Math.round(remaining)}%`,
+          enabled: false,
+        });
+      } else if (quota.balance !== null) {
+        items.push({
+          label: `${quota.providerName} · ${quota.balance.toFixed(2)} ${quota.currency ?? ''}`.trim(),
           enabled: false,
         });
       }
@@ -174,18 +197,33 @@ export class TrayManager {
         ? `${zh ? '路由' : 'Router'} ${state.router.usageToday.requests}${zh ? ' 请求' : ' req'}`
         : `${zh ? '路由' : 'Router'} ${zh ? '已停止' : 'off'}`,
     );
+    const tooltipVisibility = state.settings.quotaVisibility;
     const snapshot = state.quota.snapshot;
-    if (snapshot) {
+    if (snapshot && tooltipVisibility[agentQuotaKey('opencode')] !== false) {
       for (const window of snapshot.windows) {
         const value = state.settings.trayShowRemaining ? window.remainingPercent : window.usedPercent;
         parts.push(`${this.windowLabel(window.id, zh)} ${Math.round(value)}%`);
       }
     }
 
-    for (const provider of state.extraProviders.filter((item) => item.configured && item.snapshot)) {
+    for (const provider of state.extraProviders.filter(
+      (item) => item.configured && item.snapshot && tooltipVisibility[agentQuotaKey(item.providerId)] !== false,
+    )) {
       if (parts.length >= 4) break;
       const remaining = Math.min(...provider.snapshot!.windows.map((window) => window.remainingPercent));
       parts.push(`${provider.providerName} ${Math.round(remaining)}%`);
+    }
+
+    for (const quota of (state.settings.trayShowRouterQuota ? state.router.quota : []).filter(
+      (quota) => tooltipVisibility[routerQuotaIdentity(quota.providerId, quota.strategyId)] !== false,
+    )) {
+      if (parts.length >= 6) break;
+      if (quota.windows.length > 0) {
+        const remaining = Math.min(...quota.windows.map((window) => Math.max(0, 100 - window.usedPercent)));
+        parts.push(`${quota.providerName} ${Math.round(remaining)}%`);
+      } else if (quota.balance !== null) {
+        parts.push(`${quota.providerName} ${quota.balance.toFixed(2)} ${quota.currency ?? ''}`.trim());
+      }
     }
 
     if (parts.length === 0) {
@@ -207,7 +245,13 @@ export class TrayManager {
 
     const extraWindows = extraConfigured.flatMap((provider) => provider.snapshot?.windows ?? []);
     const openCodeWindows = state.quota.snapshot?.windows ?? [];
-    const windows = [...openCodeWindows, ...extraWindows];
+    const routerWindows = (state.settings.trayShowRouterQuota ? state.router.quota : []).flatMap((quota) =>
+      quota.windows.map((window) => ({
+        remainingPercent: Math.max(0, 100 - window.usedPercent),
+        status: window.usedPercent >= 100 ? ('rate-limited' as const) : ('ok' as const),
+      })),
+    );
+    const windows = [...openCodeWindows, ...extraWindows, ...routerWindows];
     if (windows.length === 0) {
       const hasError = Boolean(state.quota.error) || extraConfigured.some((provider) => provider.error);
       return hasError ? 'stale' : 'off';

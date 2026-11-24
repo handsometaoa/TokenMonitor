@@ -45,6 +45,7 @@ async function setup(options: {
   upstreamPort: number;
   apiKey?: string;
   balance?: boolean;
+  captureBodies?: boolean;
 }): Promise<{
   repo: RouterRepository;
   gateway: RouterGateway;
@@ -57,7 +58,13 @@ async function setup(options: {
   const logger = new Logger(dir);
   const port = await freePort();
   const apiKey = 'sk-router-test-key';
-  repo.setServiceConfig({ enabled: true, port, apiKey, proxyUrl: '' });
+  repo.setServiceConfig({
+    enabled: true,
+    port,
+    apiKey,
+    proxyUrl: '',
+    captureBodies: options.captureBodies ?? true,
+  });
   repo.setBalanceConfig({
     enabled: options.balance ?? false,
     sessionAffinity: false,
@@ -266,6 +273,35 @@ describe('RouterGateway', () => {
     const logs = repo.listLogs({ limit: 10 });
     expect(logs.items[0].status).toBe(200);
     expect(logs.items[0].totalTokens).toBe(11);
+  });
+
+  it('omits request and response bodies when body capture is disabled', async () => {
+    const { server, port: upstreamPort } = await upstreamServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            choices: [{ index: 0, message: { role: 'assistant', content: 'quiet' }, finish_reason: 'stop' }],
+            usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+          }),
+        );
+      });
+    });
+    cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const { repo, port } = await setup({ protocol: 'openai', upstreamPort, captureBodies: false });
+
+    const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer sk-router-test-key', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'test-model', messages: [{ role: 'user', content: 'secret prompt' }] }),
+    });
+    expect(response.status).toBe(200);
+    await wait();
+    const log = repo.listLogs({ limit: 1 }).items[0];
+    expect(log.totalTokens).toBe(5);
+    expect(log.requestBody).toBeNull();
+    expect(log.responseBody).toBeNull();
   });
 
   it('rejects invalid local API keys without calling upstream', async () => {

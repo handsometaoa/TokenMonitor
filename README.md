@@ -12,11 +12,12 @@ Windows 托盘版 OpenCode Go 余量监控 + 本地 AI 路由网关，参考 [Co
 - **本地 token 统计**：只读 OpenCode SQLite，按今日 / 7 天 / 30 天 / 全部展示 token、会话、模型排行。
 - **TTFT 趋势**：可选开启本地测速代理，按模型记录实时首 token 延迟；有 usage 时附带 tok/s。
 - **历史性能复盘**：直接读取本机 OpenCode 会话记录，回溯 TTFT、输出 tok/s、prefill 速度与 Agent 单轮耗时；支持 7 天 / 30 天 / 全部，无需开启代理。
-- **路由优先总览**：主面板首屏聚合网关状态、今日请求/Tokens、所有 Provider 余量摘要、近 7 天用量和最近请求；OpenCode 只是其中一个数据源。
+- **路由优先总览**：主面板首屏聚合网关状态、今日请求/Tokens、所有 Provider 余量摘要、路由健康、近 7 天用量和最近请求；OpenCode 只是其中一个数据源；卡片可在设置 → 外观中显示/隐藏并拖拽排序。
 - **本地 AI 路由**：OpenAI Chat / Anthropic Messages / OpenAI Responses 三协议入口与 3×3 转换，按对外模型名组成渠道组，自动故障转移。
 - **负载均衡**：可用度权重、会话亲和、额度前置拦截；只在尚未向客户端写出字节时改道。
 - **请求日志与用量**：记录最终渠道、状态、耗时、token、重试轨迹；按日/小时聚合，提供成功率、缓存与趋势看板。
-- **路由控制台**：独立 1180×800 窗口，提供商、模型渠道、服务、日志、用量、余量、设置七个页面。
+- **路由控制台**：独立 1180×800 窗口，提供商、模型渠道、服务、日志、用量、余量、设置七个页面；模型组支持整组重命名与启停。
+- **Provider 设置统一**：OpenCode Go 与 Codex、Claude、Cursor、Z.AI、ZCode 合并到设置页同一入口；AI Router 分区可直接调整负载均衡与额度拦截。
 - **Codex 额度重置积分**：显示可用重置次数与下一次过期倒计时。
 - **Provider 状态/事件**：拉取 OpenAI / Anthropic / Cursor 的公开 Statuspage，显示服务降级、事件数量和受影响组件。
 - **Windows 原生体验**：系统托盘、flyout 面板、Toast 通知、开机自启、单实例、深色/浅色主题。
@@ -101,10 +102,10 @@ TTFT 页的“会话历史”数据源直接读取 OpenCode SQLite 的 `message`
 托盘菜单 →「路由控制台…」，或监控面板右上角网络图标，打开独立的 AI Router 控制台。
 
 - **提供商**：Base URL（完整 API 根，含 `/v1`）、协议（openai / anthropic / openai-responses）、API Key / OAuth token / Cookie、余量策略。
-- **模型渠道**：对外模型名 → 上游模型名；同名多行即一个渠道组，由负载均衡选路。
+- **模型渠道**：对外模型名 → 上游模型名；同名多行即一个渠道组，由负载均衡选路。模型页支持整组重命名、整组启停，以及单渠道编辑/归档/删除。
 - **本地网关**：默认关闭，启动后只监听 `127.0.0.1:<port>`；同时兼容三种协议入口和 `/v1/models`。
 - **日志/用量**：请求进入后写 pending，结束后回填；token 只统计成功请求，未返回 usage 时按字符估算。
-- **余量**：内置 9 家策略（OpenCode、Z.AI、Codex、Claude、Cursor、DeepSeek、OpenRouter、Moonshot、SiliconFlow），额度耗尽自动阻断渠道。
+- **余量**：内置 25 家策略（OpenCode、Z.AI、Codex、Claude、Cursor、DeepSeek、OpenRouter、Moonshot、SiliconFlow、MiniMax、AiAnd、Chutes、DeepInfra、ElevenLabs、Venice、xAI、Warp、Crof、ZenMux、NeuralWatt、LLM Proxy、LiteLLM、Codebuff、Custom HTTP、Custom JS），额度耗尽自动阻断渠道。
 - **安全**：上游 Key 不写入路由库，使用 DPAPI/Keychain 加密；本地网关 Key 独立生成，可随时重置；支持 HTTP(S) 上游代理。
 
 接入示例：
@@ -209,8 +210,8 @@ $env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"; npm install
 - Cursor 的本地 token 如果是 Chromium DPAPI 加密的 `cursor-safe-storage`，当前不会尝试解密；请粘贴 Cookie header 或 session token。
 - ZCode 自动读取当前激活的 Coding Plan 凭证；BigModel 团队版需要 Organization/Project 选择器，否则额度接口会返回“无 Coding Plan”。此时请在多 Provider 设置中粘贴团队 JSON。
 - 本地 token 统计、历史性能复盘和 TTFT 目前仍只针对 OpenCode；其他 Provider 只接额度或路由。
-- AI Router 的余量策略目前内置 9 家；ai-router 的其余 provider 适配器尚未移植，策略注册表已留扩展点。
-- 路由日志默认保存请求/响应正文（鉴权头已剔除），保留 7 天；敏感场景请手动清空日志或后续增加“只记元数据”开关。
+- AI Router 的余量策略目前内置 25 家；ai-router 的其余 provider 适配器尚未移植，策略注册表已留扩展点。
+- 路由日志默认保存请求/响应正文（鉴权头已剔除），保留 7 天；服务页可关闭正文落库，只保留状态、耗时、token 和标头。
 - 跨协议转换不保证协议特有字段全量保真；需要原样透传时让入口协议与上游协议一致。
 - 路由服务默认关闭；启动后仅监听 loopback，不会主动对外开放。
 - 历史 TTFT 为回放值，包含请求排队与网络，无法拆分上游服务端耗时；精确测量仍以本地代理为准。

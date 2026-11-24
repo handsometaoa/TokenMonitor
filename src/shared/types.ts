@@ -1,5 +1,5 @@
 export const APP_NAME = 'TokenMonitor';
-export const APP_VERSION = '0.4.0';
+export const APP_VERSION = '0.4.6';
 export const QUOTA_API_URL = 'https://opencode.ai/zen/go/v1/usage';
 
 export type QuotaWindowId = 'rolling' | 'weekly' | 'monthly';
@@ -121,6 +121,29 @@ export type Theme = 'system' | 'light' | 'dark';
 export type Language = 'zh-CN' | 'en';
 export type CredentialSource = 'auto' | 'manual';
 
+export type HomeCardId = 'quota' | 'health' | 'trend' | 'recent';
+
+export interface HomeCardSettings {
+  quota: boolean;
+  health: boolean;
+  trend: boolean;
+  recent: boolean;
+}
+
+/** Router quota strategies that mirror a local agent subscription (dedup + visibility share one key). */
+const AGENT_STRATEGY_IDS = new Set(['opencode', 'codex', 'claude', 'cursor', 'zai']);
+
+/** Stable visibility/dedup key for an agent subscription. ZCode and Z.AI share one account system. */
+export function agentQuotaKey(providerId: string): string {
+  const key = providerId === 'opencode' || providerId === 'opencode-go' ? 'agent:opencode' : `agent:${providerId}`;
+  return key === 'agent:zcode' ? 'agent:zai' : key;
+}
+
+/** Visibility/dedup key for a router quota entry: agent strategies share the agent key, others stay per-provider. */
+export function routerQuotaIdentity(providerId: string, strategyId: string | null | undefined): string {
+  return strategyId && AGENT_STRATEGY_IDS.has(strategyId) ? agentQuotaKey(strategyId) : `router:${providerId}`;
+}
+
 export interface NotificationSettings {
   enabled: boolean;
   /** Remaining-percentage thresholds, e.g. [20, 5]. */
@@ -128,12 +151,6 @@ export interface NotificationSettings {
   rateLimited: boolean;
   reset: boolean;
   pace: boolean;
-}
-
-export interface SpeedSettings {
-  enabled: boolean;
-  upstreamBase: string;
-  configApplied: boolean;
 }
 
 export interface WindowBounds {
@@ -149,6 +166,11 @@ export interface AppSettings {
   language: Language;
   refreshMinutes: number;
   notifications: NotificationSettings;
+  homeCards: HomeCardSettings;
+  homeCardOrder: HomeCardId[];
+  /** Per-Agent display switch for the overview quota card, keyed by stable agent key. Missing = shown. */
+  quotaVisibility: Record<string, boolean>;
+  trayShowRouterQuota: boolean;
   launchAtLogin: boolean;
   startHidden: boolean;
   hideOnBlur: boolean;
@@ -157,7 +179,6 @@ export interface AppSettings {
   localDataPath: string | null;
   credentialSource: CredentialSource;
   orgId: string;
-  speed: SpeedSettings;
   onboardingCompleted: boolean;
   windowBounds: WindowBounds | null;
 }
@@ -199,138 +220,6 @@ export interface TokenTotals {
   total: number;
 }
 
-export interface LocalUsageDay extends TokenTotals {
-  day: string;
-  messages: number;
-}
-
-export interface LocalUsageModel extends TokenTotals {
-  provider: string;
-  model: string;
-  messages: number;
-}
-
-export interface LocalUsageError {
-  code: 'missing' | 'locked' | 'schema' | 'unknown';
-  message: string;
-}
-
-export interface LocalUsageSummary {
-  range: LocalUsageRange;
-  generatedAt: number;
-  dbPath: string;
-  schema: LocalSchemaKind;
-  source: 'sqlite' | 'demo' | 'none';
-  totals: TokenTotals;
-  sessions: number;
-  messages: number;
-  days: LocalUsageDay[];
-  models: LocalUsageModel[];
-  partial: boolean;
-  error?: LocalUsageError;
-}
-
-export type SpeedRange = '7d' | '30d';
-export type HistoryRange = SpeedRange | 'all';
-
-export interface SpeedPoint {
-  day: string;
-  provider: string;
-  model: string;
-  tokensPerSecond: number;
-  ttftMs: number | null;
-  samples: number;
-  tokenSource: 'upstream' | 'local' | 'mixed' | 'unknown';
-}
-
-export interface SpeedSeries {
-  range: SpeedRange;
-  generatedAt: number;
-  enabled: boolean;
-  running: boolean;
-  points: SpeedPoint[];
-  totalSamples: number;
-  approximate: boolean;
-  error?: string;
-}
-
-export interface SpeedStatus {
-  enabled: boolean;
-  running: boolean;
-  port: number | null;
-  upstreamBase: string;
-  sampleCount: number;
-  lastSampleAt: number | null;
-  configApplied: boolean;
-  error: string | null;
-}
-
-export type HistoryMetricKey = 'ttft' | 'output' | 'prefill' | 'turn';
-
-export interface HistoryMetricsPoint {
-  day: string;
-  steps: number;
-  turns: number;
-  avgTtftMs: number | null;
-  outputTps: number | null;
-  prefillTps: number | null;
-  turnMs: number | null;
-}
-
-export interface HistoryMetricsModel {
-  provider: string;
-  model: string;
-  steps: number;
-  turns: number;
-  outputTokens: number;
-  inputTokens: number;
-  cacheReadTokens: number;
-  generationMs: number;
-  avgTtftMs: number | null;
-  p95TtftMs: number | null;
-  outputTps: number | null;
-  prefillTps: number | null;
-  turnMs: number | null;
-  cacheHitPercent: number | null;
-  points: HistoryMetricsPoint[];
-}
-
-export interface HistoryMetricsTotals {
-  steps: number;
-  turns: number;
-  outputTokens: number;
-  inputTokens: number;
-  cacheReadTokens: number;
-  generationMs: number;
-  avgTtftMs: number | null;
-  p50TtftMs: number | null;
-  p95TtftMs: number | null;
-  outputTps: number | null;
-  prefillTps: number | null;
-  turnMs: number | null;
-  cacheHitPercent: number | null;
-}
-
-export interface HistoryMetrics {
-  range: HistoryRange;
-  generatedAt: number;
-  dbPath: string;
-  source: 'sqlite' | 'demo' | 'none';
-  totals: HistoryMetricsTotals;
-  days: HistoryMetricsPoint[];
-  models: HistoryMetricsModel[];
-  approximate: true;
-  error?: LocalUsageError;
-}
-
-export interface SpeedConfigInfo {
-  proxyUrl: string;
-  snippet: string;
-  configPathHint: string;
-  applied: boolean;
-  running: boolean;
-}
-
 export interface QuotaHistoryPoint {
   ts: number;
   rolling: number | null;
@@ -351,7 +240,6 @@ export interface AppState {
   quota: QuotaState;
   extraProviders: ExtraProviderState[];
   serviceStatuses: ServiceStatus[];
-  speed: SpeedStatus;
   router: import('./routerTypes').RouterState;
 }
 
@@ -367,6 +255,10 @@ export interface UpdateSettingsPatch {
   language?: Language;
   refreshMinutes?: number;
   notifications?: Partial<NotificationSettings>;
+  homeCards?: Partial<HomeCardSettings>;
+  homeCardOrder?: HomeCardId[];
+  quotaVisibility?: Record<string, boolean>;
+  trayShowRouterQuota?: boolean;
   launchAtLogin?: boolean;
   startHidden?: boolean;
   hideOnBlur?: boolean;

@@ -1,4 +1,4 @@
-import { AlertTriangle, KeyRound, RefreshCw } from 'lucide-react';
+import { AlertTriangle, EyeOff, KeyRound, RefreshCw } from 'lucide-react';
 import type { AppState, Language, ProviderSnapshot, QuotaState } from '../../../shared/types';
 import type { Translator } from '../i18n';
 import { formatRelative } from '../format';
@@ -65,6 +65,7 @@ export function ProviderCard({
   t,
   onRetry,
   onOpenSettings,
+  onHide,
 }: {
   state: AppState;
   now: number;
@@ -72,6 +73,7 @@ export function ProviderCard({
   t: Translator;
   onRetry: () => void;
   onOpenSettings: () => void;
+  onHide?: () => void;
 }) {
   const { quota } = state;
   const snapshot = quota.snapshot;
@@ -144,6 +146,7 @@ export function ProviderCard({
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <Chip tone={status.tone === 'neutral' ? 'neutral' : status.tone}>{t(status.labelKey)}</Chip>
           <IconButton icon={RefreshCw} label={t('common.refresh')} onClick={onRetry} disabled={quota.loading} />
+          {onHide ? <IconButton icon={EyeOff} label={language === 'zh-CN' ? '隐藏该 Agent' : 'Hide this agent'} onClick={onHide} /> : null}
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-import { AlertTriangle, Plug, RefreshCw, Settings2 } from 'lucide-react';
+import { AlertTriangle, EyeOff, Plug, RefreshCw, Settings2 } from 'lucide-react';
 import type { ExtraProviderState, ExtraProviderWindow, Language } from '../../../shared/types';
 import type { Translator } from '../i18n';
 import { formatAbsolute, formatCountdown, formatDaily, formatPercent, formatRelative } from '../format';
@@ -91,6 +91,7 @@ export function ExtraProviderCard({
   t,
   onOpenSettings,
   onRefresh,
+  onHide,
 }: {
   state: ExtraProviderState;
   now: number;
@@ -98,6 +99,7 @@ export function ExtraProviderCard({
   t: Translator;
   onOpenSettings: () => void;
   onRefresh: () => void;
+  onHide?: () => void;
 }) {
   if (!state.snapshot) {
     if (!state.configured) return null;
@@ -126,6 +128,7 @@ export function ExtraProviderCard({
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <Chip tone="danger">{state.error?.code === 'no-subscription' ? (language === 'zh-CN' ? '无可用套餐' : 'No plan') : t('error.unknown')}</Chip>
             <IconButton icon={RefreshCw} label={t('common.refresh')} onClick={onRefresh} disabled={state.loading} />
+            {onHide ? <IconButton icon={EyeOff} label={language === 'zh-CN' ? '隐藏该 Agent' : 'Hide this agent'} onClick={onHide} /> : null}
           </div>
         </div>
         <div style={{ marginTop: 8 }}>
@@ -174,6 +177,7 @@ export function ExtraProviderCard({
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <Chip tone={status.tone === 'neutral' ? 'neutral' : status.tone}>{state.stale ? t('extra.stale') : status.label}</Chip>
           <IconButton icon={RefreshCw} label={t('common.refresh')} onClick={onRefresh} disabled={state.loading} />
+          {onHide ? <IconButton icon={EyeOff} label={language === 'zh-CN' ? '隐藏该 Agent' : 'Hide this agent'} onClick={onHide} /> : null}
         </div>
       </div>
 

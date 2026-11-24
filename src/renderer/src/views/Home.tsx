@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Copy, Gauge, Network, RefreshCw, Server, Zap } from 'lucide-react';
+import { ArrowRight, Copy, Eye, EyeOff, Gauge, Network, RefreshCw, Server, Zap } from 'lucide-react';
+import { agentQuotaKey, routerQuotaIdentity } from '../../../shared/types';
 import type { AppState, Language } from '../../../shared/types';
 import type { RouterLogPage, RouterUsageOverview } from '../../../shared/routerTypes';
 import { LineChart, type LineSeries } from '../components/LineChart';
@@ -12,9 +13,7 @@ interface HomeQuota {
   remaining: number | null;
   detail: string;
   tone: 'good' | 'warn' | 'danger' | 'neutral';
-}
-
-const COPY = {
+}const COPY = {
   'zh-CN': {
     router: 'AI Router 本地网关',
     running: '运行中',
@@ -32,6 +31,15 @@ const COPY = {
     copied: '已复制',
     quota: '余量概览',
     manage: '管理',
+    healthTitle: '路由健康',
+    healthSub: '负载均衡 · 故障转移',
+    configure: '配置',
+    healthy: '正常',
+    degraded: '降级',
+    blocked: '已阻断',
+    affinity: '会话亲和',
+    guard: '额度拦截',
+    attempts: '最多尝试',
     remaining: '剩余',
     balance: '余额',
     noQuota: '还没有可展示的余量',
@@ -68,6 +76,15 @@ const COPY = {
     copied: 'Copied',
     quota: 'Quota overview',
     manage: 'Manage',
+    healthTitle: 'Channel health',
+    healthSub: 'Balancing · failover',
+    configure: 'Configure',
+    healthy: 'Healthy',
+    degraded: 'Degraded',
+    blocked: 'Blocked',
+    affinity: 'Affinity',
+    guard: 'Quota guard',
+    attempts: 'Max attempts',
     remaining: 'left',
     balance: 'Balance',
     noQuota: 'No quota to show yet',
@@ -94,6 +111,24 @@ function lowestRemaining(windows: Array<{ usedPercent: number }>): number | null
   return Math.min(...windows.map((window) => Math.max(0, 100 - window.usedPercent)));
 }
 
+/** Stable identity used for dedup + the per-row visibility switch comes from shared/types. */
+
+function shortWindowLabel(label: string, zh: boolean): string {
+  if (/5[- ]?hour|rolling/i.test(label)) return '5h';
+  if (/week/i.test(label)) return zh ? '周' : 'W';
+  if (/month/i.test(label)) return zh ? '月' : 'M';
+  return label;
+}
+
+function windowSummary(
+  windows: Array<{ label: string; remaining: number }>,
+  zh: boolean,
+): string {
+  return windows
+    .map((window) => `${shortWindowLabel(window.label, zh)} ${Math.round(window.remaining)}%`)
+    .join(' · ');
+}
+
 function toneFor(remaining: number | null): HomeQuota['tone'] {
   if (remaining === null) return 'neutral';
   if (remaining <= 10) return 'danger';
@@ -117,6 +152,7 @@ export function Home({
   onOpenQuota: () => void;
 }) {
   const copy = COPY[language];
+  const zh = language === 'zh-CN';
   const [usage, setUsage] = useState<RouterUsageOverview | null>(null);
   const [todayUsage, setTodayUsage] = useState<RouterUsageOverview | null>(null);
   const [logs, setLogs] = useState<RouterLogPage>({ items: [], total: 0 });
@@ -148,6 +184,9 @@ export function Home({
   }, [load]);
 
   const router = state.router;
+  const cards = state.settings.homeCards;
+  const order = state.settings.homeCardOrder;
+  const cardOrder = (id: (typeof order)[number]) => ({ order: Math.max(0, order.indexOf(id)) });
   const running = router.service.state === 'running';
   const today = todayUsage
     ? {
@@ -162,50 +201,76 @@ export function Home({
   const baseUrl = `http://127.0.0.1:${router.service.port}/v1`;
 
   const quotas = useMemo<HomeQuota[]>(() => {
-    const items: HomeQuota[] = [];
+    // All quota sources keyed by stable Agent identity so the same account
+    // (queried from the auth-file snapshot AND the router strategy) collapses to one row.
+    const byIdentity = new Map<string, HomeQuota>();
+    const push = (
+      identity: string,
+      name: string,
+      remaining: number | null,
+      detail: string,
+      tone: HomeQuota['tone'],
+    ) => {
+      const existing = byIdentity.get(identity);
+      if (existing) {
+        // Prefer the entry that actually has a numeric remaining value.
+        if (existing.remaining === null && remaining !== null) {
+          byIdentity.set(identity, { key: identity, name, remaining, detail, tone });
+        }
+        return;
+      }
+      byIdentity.set(identity, { key: identity, name, remaining, detail, tone });
+    };
+
     const openCode = state.quota.snapshot;
     if (openCode) {
       const remaining = lowestRemaining(openCode.windows);
-      items.push({
-        key: 'opencode',
-        name: 'OpenCode Go',
+      push(
+        agentQuotaKey('opencode'),
+        openCode.planLabel || 'OpenCode Go',
         remaining,
-        detail: openCode.planLabel,
-        tone: toneFor(remaining),
-      });
+        windowSummary(
+          openCode.windows.map((window) => ({ label: window.id, remaining: window.remainingPercent })),
+          zh,
+        ),
+        toneFor(remaining),
+      );
     }
     for (const provider of state.extraProviders) {
       if (!provider.snapshot) continue;
       const remaining = lowestRemaining(provider.snapshot.windows);
-      items.push({
-        key: `extra:${provider.providerId}`,
-        name: provider.providerName,
+      push(
+        agentQuotaKey(provider.providerId),
+        provider.providerName,
         remaining,
-        detail: provider.snapshot.planLabel,
-        tone: toneFor(remaining),
-      });
+        windowSummary(
+          provider.snapshot.windows.map((window) => ({ label: window.label, remaining: window.remainingPercent })),
+          zh,
+        ) || provider.snapshot.planLabel,
+        toneFor(remaining),
+      );
     }
     for (const item of router.quota) {
       if (item.windows.length > 0) {
         const remaining = lowestRemaining(item.windows);
-        items.push({
-          key: `router:${item.providerId}`,
-          name: item.providerName,
+        push(
+          routerQuotaIdentity(item.providerId, item.strategyId),
+          item.providerName,
           remaining,
-          detail: item.strategyLabel ?? item.strategyId ?? '',
-          tone: toneFor(remaining),
-        });
+          windowSummary(
+            item.windows.map((window) => ({ label: window.label, remaining: 100 - window.usedPercent })),
+            zh,
+          ) || item.strategyLabel || item.strategyId || '',
+          toneFor(remaining),
+        );
       } else if (item.balance !== null) {
-        items.push({
-          key: `router:${item.providerId}`,
-          name: item.providerName,
-          remaining: null,
-          detail: `${copy.balance} ${item.balance.toFixed(2)} ${item.currency ?? ''}`.trim(),
-          tone: item.balance <= 0 ? 'danger' : 'neutral',
-        });
+        push(routerQuotaIdentity(item.providerId, item.strategyId), item.providerName, null, `${copy.balance} ${item.balance.toFixed(2)} ${item.currency ?? ''}`.trim(), item.balance <= 0 ? 'danger' : 'neutral');
       }
     }
-    return items
+
+    const visibility = state.settings.quotaVisibility;
+    return [...byIdentity.values()]
+      .filter((item) => visibility[item.key] !== false)
       .sort((a, b) => {
         if (a.remaining === null && b.remaining === null) return a.name.localeCompare(b.name);
         if (a.remaining === null) return 1;
@@ -213,7 +278,32 @@ export function Home({
         return a.remaining - b.remaining;
       })
       .slice(0, 6);
-  }, [state.quota.snapshot, state.extraProviders, router.quota, copy.balance]);
+  }, [state.quota.snapshot, state.extraProviders, state.settings.quotaVisibility, router.quota, copy.balance, zh]);
+
+  /** Hidden identities (not shown in the list) so the eye toggle can bring them back. */
+  const hiddenQuotas = useMemo<Array<{ key: string; name: string }>>(() => {
+    const shown = new Set(quotas.map((item) => item.key));
+    const visibility = state.settings.quotaVisibility;
+    const all = new Map<string, string>();
+    if (state.quota.snapshot) all.set(agentQuotaKey('opencode'), state.quota.snapshot.planLabel || 'OpenCode Go');
+    for (const provider of state.extraProviders) {
+      if (provider.snapshot || provider.configured) all.set(agentQuotaKey(provider.providerId), provider.providerName);
+    }
+    for (const item of router.quota) {
+      const identity = routerQuotaIdentity(item.providerId, item.strategyId);
+      if (!all.has(identity)) all.set(identity, item.providerName);
+    }
+    return [...all.entries()]
+      .filter(([key]) => visibility[key] === false && !shown.has(key))
+      .map(([key, name]) => ({ key, name }));
+  }, [quotas, state.quota.snapshot, state.extraProviders, router.quota, state.settings.quotaVisibility]);
+
+  const toggleQuotaVisibility = (identity: string) => {
+    const current = state.settings.quotaVisibility;
+    const next = { ...current, [identity]: current[identity] === false };
+    if (current[identity] !== false) next[identity] = false;
+    void window.tokenMonitor.updateSettings({ quotaVisibility: { [identity]: next[identity] } });
+  };
 
   const series: LineSeries[] = usage
     ? [
@@ -232,7 +322,7 @@ export function Home({
 
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <section className={`home-hero ${running ? 'running' : ''}`}>
+      <section className={`home-hero ${running ? 'running' : ''}`} style={{ order: -1 }}>
         <div className="home-hero-head">
           <div className="home-hero-icon">
             <Network size={18} />
@@ -289,7 +379,8 @@ export function Home({
         </div>
       </section>
 
-      <section className="glass-card home-quota-card">
+      {cards.quota ? (
+      <section className="glass-card home-quota-card" style={cardOrder('quota')}>
         <div className="home-section-head">
           <div>
             <div className="home-section-title">{copy.quota}</div>
@@ -306,12 +397,12 @@ export function Home({
         ) : (
           <div className="home-quota-list">
             {quotas.map((quota) => (
-              <button type="button" className="home-quota-row" key={quota.key} onClick={onOpenQuota}>
-                <div className="home-quota-main">
+              <div className="home-quota-row" key={quota.key}>
+                <button type="button" className="home-quota-main" onClick={onOpenQuota} title={quota.name}>
                   <div className="home-quota-name">
                     <span className={`home-quota-dot ${quota.tone}`} />
                     <strong>{quota.name}</strong>
-                    <span>{quota.detail}</span>
+                    <span>{quota.remaining === null ? quota.detail : quota.detail}</span>
                   </div>
                   <div className="home-quota-track">
                     <div
@@ -319,18 +410,76 @@ export function Home({
                       style={{ width: `${quota.remaining === null ? 0 : Math.max(2, quota.remaining)}%` }}
                     />
                   </div>
-                </div>
+                </button>
                 <div className={`home-quota-value ${quota.tone}`}>
-                  {quota.remaining === null ? quota.detail : `${quota.remaining.toFixed(0)}%`}
+                  {quota.remaining === null ? '—' : `${quota.remaining.toFixed(0)}%`}
                   {quota.remaining !== null ? <span>{copy.remaining}</span> : null}
                 </div>
-              </button>
+                <button
+                  type="button"
+                  className="icon-btn subtle home-quota-toggle"
+                  title={zh ? '在总览中隐藏该 Agent' : 'Hide this agent from overview'}
+                  onClick={() => toggleQuotaVisibility(quota.key)}
+                >
+                  <Eye size={13} />
+                </button>
+              </div>
             ))}
           </div>
         )}
+        {hiddenQuotas.length > 0 ? (
+          <div className="home-quota-hidden">
+            {hiddenQuotas.map((quota) => (
+              <button type="button" key={quota.key} className="home-hidden-chip" onClick={() => toggleQuotaVisibility(quota.key)}>
+                <EyeOff size={11} />
+                {quota.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </section>
+      ) : null}
 
-      <section className="glass-card home-trend-card">
+      {cards.health && router.channelHealth.length > 0 ? (
+        <section className="glass-card home-health-card" style={cardOrder('health')}>
+          <div className="home-section-head">
+            <div>
+              <div className="home-section-title">{copy.healthTitle}</div>
+              <div className="home-section-sub">{copy.healthSub}</div>
+            </div>
+            <button type="button" className="home-link" onClick={openRouter}>
+              {copy.configure} <ArrowRight size={12} />
+            </button>
+          </div>
+          <div className="home-health-list">
+            {router.channelHealth.slice(0, 5).map((item) => (
+              <div className="home-health-row" key={item.providerId}>
+                <span
+                  className={`home-quota-dot ${
+                    item.state === 'healthy' ? 'good' : item.state === 'degraded' ? 'warn' : 'danger'
+                  }`}
+                />
+                <div className="home-health-main">
+                  <strong>{item.providerName}</strong>
+                  <span>
+                    {item.blockReason ??
+                      item.lastError ??
+                      (item.state === 'healthy' ? copy.healthy : item.state === 'degraded' ? copy.degraded : copy.blocked)}
+                  </span>
+                </div>
+                <span className="mono home-health-value">{item.availability}</span>
+              </div>
+            ))}
+          </div>
+          <div className="home-health-foot">
+            {copy.affinity} {router.balance.sessionAffinity ? (zh ? '开' : 'on') : zh ? '关' : 'off'} · {copy.guard}{' '}
+            {router.balance.quotaGuard ? (zh ? '开' : 'on') : zh ? '关' : 'off'} · {copy.attempts} {router.balance.maxAttempts}
+          </div>
+        </section>
+      ) : null}
+
+      {cards.trend ? (
+      <section className="glass-card home-trend-card" style={cardOrder('trend')}>
         <div className="home-section-head">
           <div>
             <div className="home-section-title">{copy.trend}</div>
@@ -345,8 +494,10 @@ export function Home({
           <div className="home-empty-inline">{copy.noUsage}</div>
         )}
       </section>
+      ) : null}
 
-      <section className="glass-card home-recent-card">
+      {cards.recent ? (
+      <section className="glass-card home-recent-card" style={cardOrder('recent')}>
         <div className="home-section-head">
           <div>
             <div className="home-section-title">{copy.recent}</div>
@@ -377,9 +528,10 @@ export function Home({
           </div>
         )}
       </section>
+      ) : null}
 
       {!hasRouterSetup && !running ? (
-        <div className="home-cta">
+        <div className="home-cta" style={{ order: 90 }}>
           <Server size={16} />
           <div>
             <strong>{copy.emptyTitle}</strong>
@@ -391,11 +543,11 @@ export function Home({
         </div>
       ) : null}
 
-      <div className="hint" style={{ padding: '0 4px', lineHeight: 1.55 }}>
+      <div className="hint" style={{ padding: '0 4px', lineHeight: 1.55, order: 100 }}>
         <Gauge size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} />
         {language === 'zh-CN'
-          ? '总览聚合网关状态、路由用量和所有 Provider 余量；OpenCode 本地统计与 TTFT 仍保留在独立页。'
-          : 'Overview combines gateway status, routed usage and all provider quotas; OpenCode local stats and TTFT stay on their own tabs.'}
+          ? '总览聚合网关状态、路由用量和各 Agent 订阅余量；详细用量与 TTFT 在路由控制台查看。'
+          : 'Overview combines gateway status, routed usage and per-agent subscription quotas; detailed usage and TTFT live in the router console.'}
       </div>
     </div>
   );

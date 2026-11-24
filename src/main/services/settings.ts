@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { createDefaultSettings, DEFAULT_SPEED_UPSTREAM } from '../../shared/defaults';
+import { createDefaultSettings } from '../../shared/defaults';
 import type { AppSettings, UpdateSettingsPatch } from '../../shared/types';
 
 const settingsSchema = z.object({
@@ -17,6 +17,15 @@ const settingsSchema = z.object({
     reset: z.boolean(),
     pace: z.boolean(),
   }),
+  homeCards: z.object({
+    quota: z.boolean(),
+    health: z.boolean(),
+    trend: z.boolean(),
+    recent: z.boolean(),
+  }),
+  homeCardOrder: z.array(z.enum(['quota', 'health', 'trend', 'recent'])).max(4),
+  quotaVisibility: z.record(z.string(), z.boolean()).default({}),
+  trayShowRouterQuota: z.boolean(),
   launchAtLogin: z.boolean(),
   startHidden: z.boolean(),
   hideOnBlur: z.boolean(),
@@ -25,11 +34,6 @@ const settingsSchema = z.object({
   localDataPath: z.string().max(2000).nullable(),
   credentialSource: z.enum(['auto', 'manual']),
   orgId: z.string().max(300),
-  speed: z.object({
-    enabled: z.boolean(),
-    upstreamBase: z.string().url(),
-    configApplied: z.boolean(),
-  }),
   onboardingCompleted: z.boolean(),
   windowBounds: z
     .object({
@@ -64,7 +68,12 @@ export class SettingsStore extends EventEmitter {
       notifications: patch.notifications
         ? { ...current.notifications, ...patch.notifications }
         : current.notifications,
-      speed: current.speed,
+      homeCards: patch.homeCards ? { ...current.homeCards, ...patch.homeCards } : current.homeCards,
+      homeCardOrder: patch.homeCardOrder ?? current.homeCardOrder,
+      quotaVisibility: patch.quotaVisibility
+        ? { ...current.quotaVisibility, ...patch.quotaVisibility }
+        : current.quotaVisibility,
+      trayShowRouterQuota: patch.trayShowRouterQuota ?? current.trayShowRouterQuota,
       schemaVersion: 1,
     };
 
@@ -85,32 +94,30 @@ export class SettingsStore extends EventEmitter {
     return this.get();
   }
 
-  setSpeedConfig(patch: Partial<AppSettings['speed']>): AppSettings {
-    const next = { ...this.settings, speed: { ...this.settings.speed, ...patch } };
-    const parsed = settingsSchema.safeParse(next);
-    if (!parsed.success) throw new Error('Invalid speed settings');
-    this.settings = parsed.data;
-    this.persist();
-    this.emit('changed', this.get());
-    return this.get();
-  }
-
   private load(): AppSettings {
     const defaults = createDefaultSettings();
     if (!existsSync(this.filePath)) return defaults;
 
     try {
       const raw = JSON.parse(readFileSync(this.filePath, 'utf8')) as unknown;
-      const parsed = settingsSchema.safeParse(raw);
+      const migrated =
+        raw && typeof raw === 'object' && !Array.isArray(raw)
+          ? {
+              ...(raw as Record<string, unknown>),
+              homeCards: { ...defaults.homeCards, ...((raw as Record<string, unknown>).homeCards as Record<string, unknown> | undefined) },
+              homeCardOrder: (raw as Record<string, unknown>).homeCardOrder ?? defaults.homeCardOrder,
+              quotaVisibility: {
+                ...defaults.quotaVisibility,
+                ...(((raw as Record<string, unknown>).quotaVisibility as Record<string, boolean> | undefined) ?? {}),
+              },
+              trayShowRouterQuota: (raw as Record<string, unknown>).trayShowRouterQuota ?? defaults.trayShowRouterQuota,
+            }
+          : raw;
+      const parsed = settingsSchema.safeParse(migrated);
       if (!parsed.success) throw new Error('schema mismatch');
       return {
         ...defaults,
         ...parsed.data,
-        speed: {
-          ...defaults.speed,
-          ...parsed.data.speed,
-          upstreamBase: parsed.data.speed.upstreamBase || DEFAULT_SPEED_UPSTREAM,
-        },
       };
     } catch {
       try {

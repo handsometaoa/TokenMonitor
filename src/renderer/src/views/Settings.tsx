@@ -1,17 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
-  Activity,
   Bell,
-  Check,
   Copy,
   Database,
   ExternalLink,
   FolderOpen,
-  Gauge,
+  GripVertical,
   Info,
-  KeyRound,
-  Network,
   Palette,
   RefreshCw,
   ShieldCheck,
@@ -21,20 +17,24 @@ import {
 import type {
   AppInfo,
   AppState,
-  CredentialDetection,
-  CredentialTestResult,
   ExtraProviderId,
-  SpeedConfigInfo,
+  HomeCardId,
   UpdateSettingsPatch,
 } from '../../../shared/types';
-import { EXTRA_PROVIDER_IDS } from '../../../shared/types';
-import { EXTRA_PROVIDER_NAMES, EXTRA_PROVIDER_URLS } from '../../../shared/providers';
 import type { Translator } from '../i18n';
 import { formatRelative } from '../format';
-import { useCopy, useNow } from '../hooks';
+import { useNow } from '../hooks';
 import { Banner, SectionCard, Segmented, Spinner, Toggle } from '../components/ui';
+import { SubscriptionCredentials } from './SubscriptionCredentials';
 
-type SettingsSection = 'general' | 'router' | 'connection' | 'providers' | 'local' | 'speed' | 'notifications' | 'appearance' | 'data' | 'about';
+type SettingsSection = 'general' | 'notifications' | 'appearance' | 'data' | 'about';
+
+const HOME_CARD_LABELS: Record<HomeCardId, { zh: string; en: string }> = {
+  quota: { zh: '余量概览', en: 'Quota overview' },
+  health: { zh: '路由健康', en: 'Channel health' },
+  trend: { zh: '近 7 天用量', en: '7-day usage' },
+  recent: { zh: '最近请求', en: 'Recent requests' },
+};
 
 interface Notice {
   tone: 'info' | 'danger';
@@ -43,11 +43,6 @@ interface Notice {
 
 const NAV: Array<{ id: SettingsSection; labelKey: Parameters<Translator>[0]; icon: LucideIcon }> = [
   { id: 'general', labelKey: 'settings.general', icon: SlidersHorizontal },
-  { id: 'router', labelKey: 'settings.routerSection', icon: Network },
-  { id: 'connection', labelKey: 'settings.connection', icon: KeyRound },
-  { id: 'providers', labelKey: 'settings.providers', icon: Activity },
-  { id: 'local', labelKey: 'settings.local', icon: Database },
-  { id: 'speed', labelKey: 'settings.speed', icon: Gauge },
   { id: 'notifications', labelKey: 'settings.notifications', icon: Bell },
   { id: 'appearance', labelKey: 'settings.appearance', icon: Palette },
   { id: 'data', labelKey: 'settings.data', icon: Trash2 },
@@ -63,53 +58,14 @@ export function SettingsPage({
   t: Translator;
   language: 'zh-CN' | 'en';
 }) {
-  const [section, setSection] = useState<SettingsSection>('connection');
+  const [section, setSection] = useState<SettingsSection>('general');
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
-  const [key, setKey] = useState('');
-  const [orgId, setOrgId] = useState(state.settings.orgId);
-  const [busy, setBusy] = useState<'detect' | 'use' | 'save' | 'speed' | 'local' | null>(null);
-  const [detection, setDetection] = useState<CredentialDetection | null>(null);
-  const [result, setResult] = useState<CredentialTestResult | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [speedConfig, setSpeedConfig] = useState<SpeedConfigInfo | null>(null);
-  const [speedTest, setSpeedTest] = useState<{ ok: boolean; message: string } | null>(null);
-  const [localInfo, setLocalInfo] = useState<{ path: string; messages: number; schema: string } | null>(null);
-  const [providerInputs, setProviderInputs] = useState<Record<ExtraProviderId, string>>({
-    codex: '',
-    claude: '',
-    cursor: '',
-    zai: '',
-    zcode: '',
-  });
-  const [providerBusy, setProviderBusy] = useState<ExtraProviderId | null>(null);
-  const { copied, copy } = useCopy();
   const now = useNow(30_000);
 
   useEffect(() => {
     void window.tokenMonitor.getAppInfo().then(setAppInfo).catch(() => undefined);
   }, []);
-
-  useEffect(() => {
-    setOrgId(state.settings.orgId);
-  }, [state.settings.orgId]);
-
-  useEffect(() => {
-    if (section !== 'speed') return;
-    void window.tokenMonitor
-      .getSpeedConfig()
-      .then(setSpeedConfig)
-      .catch((error) => setNotice({ tone: 'danger', text: error instanceof Error ? error.message : String(error) }));
-  }, [section, state.settings.speed.enabled, state.speed.running]);
-
-  useEffect(() => {
-    if (section !== 'local') return;
-    void window.tokenMonitor
-      .refreshLocalUsage('all')
-      .then((summary) => {
-        setLocalInfo({ path: summary.dbPath, messages: summary.messages, schema: summary.schema });
-      })
-      .catch(() => undefined);
-  }, [section, state.settings.localUsageEnabled, state.settings.localDataPath]);
 
   const update = async (patch: UpdateSettingsPatch) => {
     setNotice(null);
@@ -133,119 +89,14 @@ export function SettingsPage({
     }
   }, [state.credentials.kind, t]);
 
-  const detect = async () => {
-    setBusy('detect');
-    setResult(null);
-    try {
-      setDetection(await window.tokenMonitor.detectCredential());
-    } catch (error) {
-      setNotice({ tone: 'danger', text: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const useDetected = async () => {
-    setBusy('use');
-    setResult(null);
-    try {
-      setResult(await window.tokenMonitor.useAutoCredential(orgId));
-    } catch (error) {
-      setResult({ ok: false, message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const saveKey = async () => {
-    setBusy('save');
-    setResult(null);
-    try {
-      const response = await window.tokenMonitor.testAndSaveKey(key, orgId);
-      setResult(response);
-      if (response.ok) setKey('');
-    } catch (error) {
-      setResult({ ok: false, message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const clearKey = async () => {
-    if (!window.confirm(t('settings.clearKey') + '?')) return;
-    await window.tokenMonitor.clearCredential();
-    setResult(null);
-    setDetection(null);
-  };
-
-  const toggleSpeed = async (enabled: boolean) => {
-    setBusy('speed');
-    setSpeedTest(null);
-    setNotice(null);
-    try {
-      await window.tokenMonitor.setSpeedEnabled(enabled);
-      setSpeedConfig(await window.tokenMonitor.getSpeedConfig());
-    } catch (error) {
-      setNotice({ tone: 'danger', text: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const testProxy = async () => {
-    setBusy('speed');
-    setSpeedTest(await window.tokenMonitor.testSpeedProxy());
-    setBusy(null);
-  };
-
-  const chooseDb = async () => {
-    const path = await window.tokenMonitor.chooseLocalDb();
-    if (path) {
-      setLocalInfo({ path, messages: localInfo?.messages ?? 0, schema: localInfo?.schema ?? '—' });
-      setNotice({ tone: 'info', text: path });
-    }
-  };
-
-  const saveProviderSecret = async (providerId: ExtraProviderId) => {
-    const secret = providerInputs[providerId].trim();
-    if (!secret) return;
-    setProviderBusy(providerId);
-    setNotice(null);
-    try {
-      await window.tokenMonitor.setProviderSecret(providerId, secret);
-      setProviderInputs((current) => ({ ...current, [providerId]: '' }));
-      setNotice({ tone: 'info', text: `${EXTRA_PROVIDER_NAMES[providerId]} 凭证已保存。` });
-    } catch (error) {
-      setNotice({ tone: 'danger', text: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setProviderBusy(null);
-    }
-  };
-
-  const clearProviderSecret = async (providerId: ExtraProviderId) => {
-    setProviderBusy(providerId);
-    setNotice(null);
-    try {
-      await window.tokenMonitor.clearProviderSecret(providerId);
-      setNotice({ tone: 'info', text: `${EXTRA_PROVIDER_NAMES[providerId]} 手动凭证已清除。` });
-    } catch (error) {
-      setNotice({ tone: 'danger', text: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setProviderBusy(null);
-    }
-  };
-
-  const rescanLocal = async () => {
-    setBusy('local');
-    try {
-      const summary = await window.tokenMonitor.refreshLocalUsage('all');
-      setLocalInfo({ path: summary.dbPath, messages: summary.messages, schema: summary.schema });
-      setNotice({ tone: 'info', text: `${summary.messages} messages · ${summary.schema}` });
-    } catch (error) {
-      setNotice({ tone: 'danger', text: error instanceof Error ? error.message : String(error) });
-    } finally {
-      setBusy(null);
-    }
+  const moveHomeCard = (from: number, to: number) => {
+    const current = state.settings.homeCardOrder;
+    if (from === to || from < 0 || to < 0 || from >= current.length || to >= current.length) return;
+    const next = [...current];
+    const [item] = next.splice(from, 1);
+    if (!item) return;
+    next.splice(to, 0, item);
+    void update({ homeCardOrder: next });
   };
 
   const providerHint = (providerId: ExtraProviderId): string => {
@@ -273,19 +124,6 @@ export function SettingsPage({
           : 'Reads Coding Plan credentials from ~/.zcode/v2/config.json; override team plans with JSON containing organizationId/projectId.';
       default:
         return '';
-    }
-  };
-
-  const providerPlaceholder = (providerId: ExtraProviderId): string => {
-    const zh = language === 'zh-CN';
-    switch (providerId) {
-      case 'cursor':
-        return zh ? 'Cookie header 或 session token' : 'Cookie header or session token';
-      case 'zai':
-      case 'zcode':
-        return zh ? 'API Key 或 JSON（团队版）' : 'API key or team JSON';
-      default:
-        return zh ? 'OAuth access token' : 'OAuth access token';
     }
   };
 
@@ -401,417 +239,7 @@ export function SettingsPage({
                 </div>
                 {state.demo ? <Banner tone="info">{t('settings.demoNote')}</Banner> : null}
               </SectionCard>
-            </>
-          ) : null}
-
-          {section === 'router' ? (
-            <>
-              <h1 className="settings-page-title">{t('settings.routerTitle')}</h1>
-              <p className="settings-page-sub">{t('settings.routerSub')}</p>
-              <SectionCard
-                title={t('settings.routerGateway')}
-                subtitle={t('settings.routerGatewaySub')}
-                action={
-                  <button type="button" className="btn btn-primary btn-sm" onClick={() => void window.tokenMonitor.openRouterWindow()}>
-                    <Network size={14} />
-                    {t('settings.routerOpen')}
-                  </button>
-                }
-              >
-                <div className="settings-row">
-                  <div className="settings-row-copy">
-                    <strong>{t('settings.routerStatus')}</strong>
-                    <span>
-                      {state.router.service.state === 'running'
-                        ? `127.0.0.1:${state.router.service.port}`
-                        : state.router.service.error ?? t('settings.routerStopped')}
-                    </span>
-                  </div>
-                  <div className="settings-control">
-                    <span
-                      className={`chip ${
-                        state.router.service.state === 'running'
-                          ? 'good'
-                          : state.router.service.state === 'error'
-                            ? 'danger'
-                            : 'warn'
-                      }`}
-                    >
-                      {state.router.service.state === 'running'
-                        ? t('settings.routerRunning')
-                        : state.router.service.state === 'error'
-                          ? t('settings.routerError')
-                          : t('settings.routerStopped')}
-                    </span>
-                  </div>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-copy">
-                    <strong>{t('settings.routerPort')}</strong>
-                    <span>{`http://127.0.0.1:${state.router.service.port}/v1`}</span>
-                  </div>
-                  <div className="settings-control">
-                    <span className="mono" style={{ fontSize: 11 }}>{state.router.channelHealth.length} providers</span>
-                  </div>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-copy">
-                    <strong>{t('settings.routerToday')}</strong>
-                    <span>
-                      {state.router.usageToday.requests} requests · {state.router.usageToday.tokens.toLocaleString()} tokens
-                    </span>
-                  </div>
-                  <div className="settings-control">
-                    <span className="mono" style={{ fontSize: 11 }}>
-                      {state.router.usageToday.successRate === null ? '—' : `${state.router.usageToday.successRate.toFixed(1)}%`}
-                    </span>
-                  </div>
-                </div>
-              </SectionCard>
-              <SectionCard title={t('settings.routerBalance')} subtitle={t('settings.routerBalanceHint')}>
-                <div className="settings-row">
-                  <div className="settings-row-copy">
-                    <strong>{t('settings.routerBalance')}</strong>
-                    <span>{state.router.balance.enabled ? 'multi-channel' : 'single-channel'}</span>
-                  </div>
-                  <div className="settings-control">
-                    <span className="mono" style={{ fontSize: 11 }}>max {state.router.balance.maxAttempts}</span>
-                  </div>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-copy">
-                    <strong>Session affinity / quota guard</strong>
-                    <span>
-                      {state.router.balance.sessionAffinity ? 'on' : 'off'} · {state.router.balance.quotaGuard ? 'on' : 'off'}
-                    </span>
-                  </div>
-                  <div className="settings-control">
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => void window.tokenMonitor.openRouterWindow()}>
-                      {t('settings.routerOpen')}
-                    </button>
-                  </div>
-                </div>
-              </SectionCard>
-            </>
-          ) : null}
-
-          {section === 'connection' ? (
-            <>
-              <h1 className="settings-page-title">{t('settings.connectionTitle')}</h1>
-              <p className="settings-page-sub">{t('settings.connectionSub')}</p>
-
-              <SectionCard title={t('settings.credential')}>
-                <div className="settings-row">
-                  <div className="settings-row-copy">
-                    <strong>{credentialSourceLabel}</strong>
-                    <span className="mono">{state.credentials.masked ?? '—'}</span>
-                    <span>{t('settings.safeStorage')}</span>
-                  </div>
-                  <div className="settings-control">
-                    <span className={`chip ${state.credentials.configured ? 'good' : 'warn'}`}>
-                      {state.credentials.configured ? t('status.normal') : t('status.off')}
-                    </span>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-                  <button type="button" className="btn" onClick={() => void detect()} disabled={busy !== null}>
-                    {busy === 'detect' ? <Spinner size={13} /> : <KeyRound size={13} />}
-                    {t('settings.detect')}
-                  </button>
-                  {detection?.found ? (
-                    <button type="button" className="btn" onClick={() => void useDetected()} disabled={busy !== null}>
-                      {busy === 'use' ? <Spinner size={13} /> : <Check size={13} />}
-                      {t('settings.useDetected')}
-                    </button>
-                  ) : null}
-                  {state.credentials.configured ? (
-                    <button type="button" className="btn btn-danger btn-sm" onClick={() => void clearKey()}>
-                      {t('settings.clearKey')}
-                    </button>
-                  ) : null}
-                </div>
-                {state.credentials.kind === 'manual' && state.credentials.configured && !state.credentials.persisted ? (
-                  <div style={{ marginTop: 8 }}>
-                    <Banner tone="warn">{t('settings.keySessionOnly')}</Banner>
-                  </div>
-                ) : null}
-                {detection ? (
-                  detection.found ? (
-                    <Banner tone="info">{t('settings.detected', { masked: detection.masked ?? '' })}</Banner>
-                  ) : (
-                    <Banner tone="warn">{detection.message}</Banner>
-                  )
-                ) : null}
-                {result ? (
-                  <div style={{ marginTop: 10 }}>
-                    <Banner tone={result.ok ? 'info' : 'danger'}>
-                      {result.ok ? (result.message ?? t('settings.keySaved')) : result.message}
-                    </Banner>
-                  </div>
-                ) : null}
-              </SectionCard>
-
-              <SectionCard title={t('settings.manualKey')}>
-                <label className="label" htmlFor="settings-key">{t('settings.manualKey')}</label>
-                <input
-                  id="settings-key"
-                  className="field"
-                  type="password"
-                  value={key}
-                  onChange={(event) => setKey(event.target.value)}
-                  placeholder={t('settings.manualKeyPlaceholder')}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <div style={{ marginTop: 9 }}>
-                  <label className="label" htmlFor="settings-org">{t('settings.orgId')}</label>
-                  <input
-                    id="settings-org"
-                    className="field"
-                    value={orgId}
-                    onChange={(event) => setOrgId(event.target.value)}
-                    placeholder="org_..."
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                  <div className="hint" style={{ marginTop: 4 }}>{t('settings.orgIdHint')}</div>
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                  <button type="button" className="btn btn-primary" onClick={() => void saveKey()} disabled={!key.trim() || busy !== null}>
-                    {busy === 'save' ? <Spinner size={13} /> : null}
-                    {busy === 'save' ? t('settings.testing') : t('settings.testSave')}
-                  </button>
-                  <button type="button" className="btn btn-ghost" onClick={() => void window.tokenMonitor.openExternal('https://opencode.ai/auth')}>
-                    {t('onboarding.link')}
-                    <ExternalLink size={12} />
-                  </button>
-                </div>
-              </SectionCard>
-            </>
-          ) : null}
-
-          {section === 'providers' ? (
-            <>
-              <h1 className="settings-page-title">{t('settings.providers')}</h1>
-              <p className="settings-page-sub">{t('settings.providersSub')}</p>
-              {EXTRA_PROVIDER_IDS.map((providerId) => {
-                const provider =
-                  state.extraProviders.find((item) => item.providerId === providerId) ?? null;
-                const configured = Boolean(provider?.configured);
-                const snapshot = provider?.snapshot ?? null;
-                return (
-                  <SectionCard
-                    key={providerId}
-                    title={EXTRA_PROVIDER_NAMES[providerId]}
-                    subtitle={providerHint(providerId)}
-                    action={
-                      <span className={`chip ${configured ? 'good' : 'warn'}`}>
-                        {configured ? sourceLabel(provider?.source ?? 'none') : t('extra.notConnected')}
-                      </span>
-                    }
-                  >
-                    <div className="settings-row" style={{ paddingTop: 0 }}>
-                      <div className="settings-row-copy">
-                        <strong>{snapshot?.planLabel ?? t('extra.notConnected')}</strong>
-                        <span>
-                          {provider?.error && !snapshot
-                            ? provider.error.message
-                            : snapshot
-                              ? `${t('extra.updated', { time: formatRelative(snapshot.fetchedAt, now, language) })}`
-                              : providerHint(providerId)}
-                        </span>
-                      </div>
-                      <div className="settings-control">
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          onClick={() => void window.tokenMonitor.openExternal(EXTRA_PROVIDER_URLS[providerId])}
-                        >
-                          <ExternalLink size={12} />
-                          {language === 'zh-CN' ? '控制台' : 'Console'}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div style={{ marginTop: 4 }}>
-                      <label className="label" htmlFor={`provider-secret-${providerId}`}>
-                        {language === 'zh-CN' ? '手动凭证' : 'Manual credential'}
-                      </label>
-                      <div className="key-row">
-                        <input
-                          id={`provider-secret-${providerId}`}
-                          className="field"
-                          type="password"
-                          value={providerInputs[providerId]}
-                          onChange={(event) =>
-                            setProviderInputs((current) => ({ ...current, [providerId]: event.target.value }))
-                          }
-                          placeholder={providerPlaceholder(providerId)}
-                          autoComplete="off"
-                          spellCheck={false}
-                        />
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          disabled={!providerInputs[providerId].trim() || providerBusy === providerId}
-                          onClick={() => void saveProviderSecret(providerId)}
-                        >
-                          {providerBusy === providerId ? <Spinner size={12} /> : null}
-                          {t('common.save')}
-                        </button>
-                        {configured ? (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            disabled={providerBusy === providerId}
-                            onClick={() => void clearProviderSecret(providerId)}
-                          >
-                            {language === 'zh-CN' ? '清除手动' : 'Clear manual'}
-                          </button>
-                        ) : null}
-                      </div>
-                      <div className="hint" style={{ marginTop: 5 }}>
-                        {providerId === 'zai' || providerId === 'zcode'
-                          ? language === 'zh-CN'
-                            ? '个人 Key 直接粘贴；BigModel 团队版粘贴 JSON（apiKey + organizationId + projectId）。'
-                            : 'Paste a personal key directly; for BigModel team plans paste JSON with apiKey + organizationId + projectId.'
-                          : language === 'zh-CN'
-                            ? '凭证使用系统加密保存，不会写入日志或渲染进程。'
-                            : 'Credentials are encrypted with the OS keystore and never sent to the renderer.'}
-                      </div>
-                    </div>
-                  </SectionCard>
-                );
-              })}
-              <Banner tone="info">
-                {language === 'zh-CN'
-                  ? 'Codex/Claude 建议先在本机登录客户端；Cursor 需要 Cookie；Z.AI 使用 API Key；ZCode 可直接读取本机 Coding Plan。'
-                  : 'Sign in to Codex/Claude locally first; Cursor needs a cookie; Z.AI uses an API key; ZCode reads the local Coding Plan.'}
-              </Banner>
-            </>
-          ) : null}
-
-          {section === 'local' ? (
-            <>
-              <h1 className="settings-page-title">{t('settings.localTitle')}</h1>
-              <p className="settings-page-sub">{t('settings.localSub')}</p>
-              <SectionCard title={t('settings.localTitle')}>
-                <div className="switch-row">
-                  <div className="switch-copy">
-                    <strong>{t('settings.localEnabled')}</strong>
-                    <span>{t('settings.localEnabledHint')}</span>
-                  </div>
-                  <Toggle checked={state.settings.localUsageEnabled} onChange={(next) => void update({ localUsageEnabled: next })} label={t('settings.localEnabled')} />
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-copy">
-                    <strong>{t('settings.dbPath')}</strong>
-                    <span className="mono" style={{ wordBreak: 'break-all' }}>{state.settings.localDataPath || t('settings.dbPathAuto')}</span>
-                    {localInfo ? <span>{localInfo.messages} messages · {localInfo.schema}</span> : null}
-                  </div>
-                  <div className="settings-control" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                    <button type="button" className="btn btn-sm" onClick={() => void chooseDb()}>
-                      <FolderOpen size={13} />
-                      {t('settings.chooseDb')}
-                    </button>
-                    <button type="button" className="btn btn-sm" onClick={() => void update({ localDataPath: null })}>
-                      {t('settings.resetDb')}
-                    </button>
-                    <button type="button" className="btn btn-sm" onClick={() => void rescanLocal()} disabled={busy === 'local'}>
-                      {busy === 'local' ? <Spinner size={13} /> : <RefreshCw size={13} />}
-                      {t('settings.rescan')}
-                    </button>
-                  </div>
-                </div>
-                <Banner tone="warn">{t('settings.privacy')}</Banner>
-              </SectionCard>
-            </>
-          ) : null}
-
-          {section === 'speed' ? (
-            <>
-              <h1 className="settings-page-title">{t('settings.speedTitle')}</h1>
-              <p className="settings-page-sub">{t('settings.speedSub')}</p>
-              <SectionCard
-                title={t('settings.speedTitle')}
-                action={
-                  <span className={`chip ${state.speed.running ? 'good' : ''}`}>
-                    {state.speed.running ? t('settings.speedRunning') : t('settings.speedStopped')}
-                  </span>
-                }
-              >
-                <div className="switch-row">
-                  <div className="switch-copy">
-                    <strong>{t('settings.speedEnable')}</strong>
-                    <span>{t('settings.speedEnableHint')}</span>
-                  </div>
-                  <Toggle
-                    checked={state.settings.speed.enabled}
-                    onChange={(next) => void toggleSpeed(next)}
-                    disabled={busy === 'speed'}
-                    label={t('settings.speedEnable')}
-                  />
-                </div>
-
-                {state.speed.error ? <Banner tone="danger">{state.speed.error}</Banner> : null}
-
-                {state.speed.running && speedConfig ? (
-                  <>
-                    <div className="settings-row">
-                      <div className="settings-row-copy">
-                        <strong>{t('settings.speedProxyUrl')}</strong>
-                        <span className="mono" style={{ wordBreak: 'break-all' }}>{speedConfig.proxyUrl}</span>
-                      </div>
-                      <div className="settings-control">
-                        <button type="button" className="btn btn-sm" onClick={() => void testProxy()} disabled={busy === 'speed'}>
-                          {busy === 'speed' ? <Spinner size={12} /> : <Activity size={13} />}
-                          {t('settings.speedTest')}
-                        </button>
-                      </div>
-                    </div>
-                    <div style={{ marginTop: 6 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                        <div className="label" style={{ marginBottom: 0 }}>{t('settings.speedConfig')}</div>
-                        <button type="button" className="btn btn-sm" onClick={() => void copy(speedConfig.snippet)}>
-                          {copied ? <Check size={12} /> : <Copy size={12} />}
-                          {copied ? t('common.copied') : t('common.copy')}
-                        </button>
-                      </div>
-                      <pre className="code-block">{speedConfig.snippet}</pre>
-                      <div className="hint" style={{ marginTop: 5 }}>{t('settings.speedConfigHint')}</div>
-                      <div className="hint" style={{ marginTop: 5 }}>
-                        {speedConfig.applied ? t('settings.speedApplied') : t('settings.speedNotApplied')}
-                      </div>
-                    </div>
-                    {speedTest ? (
-                      <div style={{ marginTop: 10 }}>
-                        <Banner tone={speedTest.ok ? 'info' : 'danger'}>
-                          {speedTest.ok ? t('settings.speedTestOk') : `${t('settings.speedTestFail')} ${speedTest.message}`}
-                        </Banner>
-                      </div>
-                    ) : null}
-                  </>
-                ) : (
-                  <Banner tone="info">{t('settings.speedEnableHint')}</Banner>
-                )}
-
-                <div style={{ marginTop: 12 }}>
-                  <Banner tone="warn">{t('settings.speedWarning')}</Banner>
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className="btn btn-danger btn-sm"
-                    onClick={async () => {
-                      if (!window.confirm(t('settings.speedClearConfirm'))) return;
-                      await window.tokenMonitor.clearSpeedSamples();
-                    }}
-                  >
-                    <Trash2 size={13} />
-                    {t('settings.speedSamples')}
-                  </button>
-                </div>
-              </SectionCard>
+              <SubscriptionCredentials state={state} language={language} onChanged={() => undefined} />
             </>
           ) : null}
 
@@ -934,6 +362,62 @@ export function SettingsPage({
                   </div>
                   <Toggle checked={state.settings.trayShowRemaining} onChange={(next) => void update({ trayShowRemaining: next })} label={t('settings.trayShowRemaining')} />
                 </div>
+                <div className="switch-row">
+                  <div className="switch-copy">
+                    <strong>{language === 'zh-CN' ? '托盘显示路由余量' : 'Show router quota in tray'}</strong>
+                    <span>
+                      {language === 'zh-CN'
+                        ? '在托盘菜单和 tooltip 中显示 AI Router Provider 余量；顺序跟随路由控制台。'
+                        : 'Show AI Router provider quotas in the tray menu and tooltip.'}
+                    </span>
+                  </div>
+                  <Toggle
+                    checked={state.settings.trayShowRouterQuota}
+                    onChange={(next) => void update({ trayShowRouterQuota: next })}
+                    label={language === 'zh-CN' ? '托盘显示路由余量' : 'Show router quota in tray'}
+                  />
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                title={language === 'zh-CN' ? '主面板卡片' : 'Home cards'}
+                subtitle={
+                  language === 'zh-CN'
+                    ? '控制「总览」页显示哪些卡片；修改即保存。'
+                    : 'Choose which cards appear on the Overview tab; changes save immediately.'
+                }
+              >
+                <div className="hint" style={{ marginBottom: 6 }}>
+                  {language === 'zh-CN' ? '拖拽调整顺序，开关控制显示。' : 'Drag to reorder; toggles control visibility.'}
+                </div>
+                {state.settings.homeCardOrder.map((id, index) => {
+                  const item = HOME_CARD_LABELS[id];
+                  const label = language === 'zh-CN' ? item.zh : item.en;
+                  return (
+                    <div
+                      className="switch-row"
+                      key={id}
+                      draggable
+                      style={{ cursor: 'grab' }}
+                      onDragStart={(event) => event.dataTransfer.setData('text/plain', String(index))}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        moveHomeCard(Number(event.dataTransfer.getData('text/plain')), index);
+                      }}
+                    >
+                      <GripVertical size={14} style={{ color: 'var(--faint)', flex: '0 0 auto' }} />
+                      <div className="switch-copy" style={{ flex: 1 }}>
+                        <strong>{label}</strong>
+                      </div>
+                      <Toggle
+                        checked={state.settings.homeCards[id]}
+                        onChange={(next) => void update({ homeCards: { [id]: next } })}
+                        label={label}
+                      />
+                    </div>
+                  );
+                })}
               </SectionCard>
             </>
           ) : null}
@@ -963,26 +447,8 @@ export function SettingsPage({
                 </div>
                 <div className="settings-row">
                   <div className="settings-row-copy">
-                    <strong>{t('settings.clearSpeed')}</strong>
-                    <span>{t('settings.speedSamples')}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-danger btn-sm"
-                    onClick={async () => {
-                      if (!window.confirm(t('settings.clearSpeedConfirm'))) return;
-                      await window.tokenMonitor.clearSpeedSamples();
-                      setNotice({ tone: 'info', text: t('settings.clearSpeedConfirm') });
-                    }}
-                  >
-                    <Trash2 size={13} />
-                    {t('common.confirm')}
-                  </button>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-copy">
                     <strong>{t('settings.logs')}</strong>
-                    <span>settings.json / quota-history / speed-samples / logs</span>
+                    <span>settings.json / quota-history / logs</span>
                   </div>
                   <button type="button" className="btn btn-sm" onClick={() => void window.tokenMonitor.openDataFolder()}>
                     <FolderOpen size={13} />

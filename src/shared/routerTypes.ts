@@ -74,6 +74,8 @@ export interface RouterServiceConfig {
   port: number;
   apiKey: string;
   proxyUrl: string;
+  /** Store request/response bodies in request_logs (headers are always stored). */
+  captureBodies: boolean;
 }
 
 export interface RouterServiceState {
@@ -112,6 +114,8 @@ export interface RouterUsageTotals {
   successCount: number;
   failCount: number;
   durationMs: number;
+  ttftMs: number;
+  ttftSamples: number;
   promptTokens: number;
   completionTokens: number;
   reasoningTokens: number;
@@ -142,6 +146,18 @@ export interface RouterUsageOverview {
   series: RouterUsageSeries;
 }
 
+export interface RouterActivityDay {
+  date: string;
+  requestCount: number;
+  totalTokens: number;
+}
+
+export interface RouterClientProviderFlow {
+  client: string;
+  providerName: string;
+  requestCount: number;
+}
+
 export interface RouterLogEntry {
   id: number;
   requestId: string;
@@ -154,6 +170,7 @@ export interface RouterLogEntry {
   path: string;
   status: number | null;
   durationMs: number | null;
+  ttftMs: number | null;
   stream: boolean;
   promptTokens: number;
   completionTokens: number;

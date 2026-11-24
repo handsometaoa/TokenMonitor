@@ -122,7 +122,7 @@ export class ServiceStatusService extends EventEmitter {
         try {
           const response = await this.fetchImpl(page.url, {
             method: 'GET',
-            headers: { Accept: 'application/json', 'User-Agent': 'TokenMonitor/0.4.0' },
+            headers: { Accept: 'application/json', 'User-Agent': 'TokenMonitor/0.4.6' },
             signal: AbortSignal.timeout(12_000),
             cache: 'no-store',
           });

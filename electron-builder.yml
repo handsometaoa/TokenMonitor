@@ -41,5 +41,7 @@ mac:
   icon: build/icon.png
   category: public.app-category.developer-tools
   artifactName: TokenMonitor-${version}-${arch}.${ext}
+  # No Apple Developer certificate in CI; skip signing so the build succeeds.
+  identity: null
 
 publish: null

@@ -15,6 +15,7 @@ export function ServicePage({
   const [port, setPort] = useState(String(config.port));
   const [apiKey, setApiKey] = useState(config.apiKey);
   const [proxyUrl, setProxyUrl] = useState(config.proxyUrl);
+  const [captureBodies, setCaptureBodies] = useState(config.captureBodies);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,7 +24,8 @@ export function ServicePage({
     setPort(String(config.port));
     setApiKey(config.apiKey);
     setProxyUrl(config.proxyUrl);
-  }, [config.enabled, config.port, config.apiKey, config.proxyUrl]);
+    setCaptureBodies(config.captureBodies);
+  }, [config.enabled, config.port, config.apiKey, config.proxyUrl, config.captureBodies]);
 
   const save = async () => {
     setError(null);
@@ -34,6 +36,7 @@ export function ServicePage({
         port: Number(port),
         apiKey: apiKey.trim(),
         proxyUrl: proxyUrl.trim(),
+        captureBodies,
       });
       onChanged();
     } catch (reason) {
@@ -105,6 +108,12 @@ export function ServicePage({
           </Field>
           <Field label="上游代理 URL" hint="HTTP(S) 代理；留空直连，支持 CONNECT 隧道">
             <input className="router-input mono" value={proxyUrl} onChange={(event) => setProxyUrl(event.target.value)} placeholder="http://127.0.0.1:7890" />
+          </Field>
+          <Field label="日志正文" hint="关闭后只记录状态、耗时和 token，不落库 prompt/回复正文">
+            <label className="router-check">
+              <input type="checkbox" checked={captureBodies} onChange={(event) => setCaptureBodies(event.target.checked)} />
+              保存请求 / 响应正文
+            </label>
           </Field>
         </div>
       </div>

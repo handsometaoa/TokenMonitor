@@ -23,9 +23,10 @@ interface FinishInfo {
   status: number;
   usage: ApiUsage;
   error: string | null;
-  responseBody: string;
+  responseBody: string | null;
   responseHeaders: Record<string, string>;
   retryTrace: AttemptTrace[];
+  ttftMs?: number | null;
 }
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
@@ -106,6 +107,25 @@ function responseHeaders(headers: Headers): Record<string, string> {
     if (!SENSITIVE_LOG_HEADERS.has(key.toLowerCase())) result[key] = value;
   });
   return result;
+}
+
+function upstreamClientMessage(status: number, body: string): string {
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (parsed && typeof parsed === 'object') {
+      const record = parsed as Record<string, unknown>;
+      if (typeof record.message === 'string' && record.message) return record.message;
+      const error = record.error;
+      if (error && typeof error === 'object') {
+        const nested = (error as Record<string, unknown>).message;
+        if (typeof nested === 'string' && nested) return nested;
+      }
+    }
+  } catch {
+    // Not JSON; fall through to the raw summary.
+  }
+  const summary = body.trim().slice(0, 240);
+  return summary || `Upstream returned HTTP ${status}`;
 }
 
 function readBody(req: IncomingMessage): Promise<Buffer> {
@@ -409,12 +429,12 @@ export class RouterGateway {
           status: upstream.status,
           error: capture(errorText, 500),
         });
-        lastError = `Upstream ${route.providerName} returned HTTP ${upstream.status}`;
+        lastError = `Upstream ${route.providerName} (HTTP ${upstream.status}): ${upstreamClientMessage(upstream.status, errorText)}`;
         if (retryable) continue;
         this.finishAttempt(res, req, path, requestId, startedAt, route, {
           status: upstream.status,
           usage: emptyUsage(),
-          error: capture(errorText, 500),
+          error: lastError,
           responseBody: capture(errorText),
           responseHeaders: responseHeaders(upstream.headers),
           retryTrace: attempts,
@@ -423,6 +443,7 @@ export class RouterGateway {
       }
 
       if (stream) {
+        const firstByteAt = Date.now();
         const result = await this.streamUpstream(
           req,
           res,
@@ -438,6 +459,7 @@ export class RouterGateway {
           upstreamAdapter,
           attempts,
           sessionKey,
+          firstByteAt - startedAt,
         );
         if (result.committed) return;
         lastError = result.error;
@@ -465,7 +487,7 @@ export class RouterGateway {
             status: 502,
             usage: emptyUsage(),
             error: message,
-            responseBody: capture(responseText),
+            responseBody: this.bodyForLog(responseText),
             responseHeaders: responseHeaders(upstream.headers),
             retryTrace: attempts,
           },
@@ -521,7 +543,7 @@ export class RouterGateway {
               status: 502,
               usage: emptyUsage(),
               error: message,
-              responseBody: capture(responseText),
+              responseBody: this.bodyForLog(responseText),
               responseHeaders: responseHeaders(upstream.headers),
               retryTrace: attempts,
             },
@@ -546,7 +568,7 @@ export class RouterGateway {
         client: clientName(req.headers['user-agent']),
         path,
         stream: false,
-        requestBody: capture(requestBodyText),
+        requestBody: this.bodyForLog(requestBodyText),
         requestHeaders: this.logHeaders(headers),
         startedAt,
       });
@@ -559,6 +581,7 @@ export class RouterGateway {
         requestId,
         status: upstream.status,
         stream: false,
+        ttftMs: Date.now() - startedAt,
         promptTokens: usage.inputTokens,
         completionTokens: usage.outputTokens,
         reasoningTokens: usage.reasoningTokens,
@@ -566,7 +589,7 @@ export class RouterGateway {
         cacheWriteTokens: usage.cacheWriteTokens,
         unrecognizedTokens: 0,
         totalTokens: totalTokens(usage),
-        responseBody: capture(responseText),
+        responseBody: this.bodyForLog(responseText),
         responseHeaders: JSON.stringify(responseHeaders(upstream.headers)),
         error: upstream.status >= 400 ? capture(responseText, 500) : null,
         retryTrace: attempts.length > 0 ? JSON.stringify(attempts) : null,
@@ -593,6 +616,7 @@ export class RouterGateway {
     upstreamAdapter: ProtocolAdapter,
     attempts: AttemptTrace[],
     sessionKey: string | null,
+    ttftMs: number | null,
   ): Promise<{ committed: boolean; error: string }> {
     const reader = upstream.body?.getReader();
     if (!reader) return { committed: false, error: 'Upstream returned no stream body' };
@@ -630,7 +654,7 @@ export class RouterGateway {
       client: clientName(req.headers['user-agent']),
       path,
       stream: true,
-      requestBody: capture(requestBodyText),
+      requestBody: this.bodyForLog(requestBodyText),
       requestHeaders: this.logHeaders({}),
       startedAt,
     });
@@ -692,6 +716,7 @@ export class RouterGateway {
           requestId,
           status: 499,
           stream: true,
+          ttftMs,
           promptTokens: 0,
           completionTokens: 0,
           reasoningTokens: 0,
@@ -716,6 +741,7 @@ export class RouterGateway {
         requestId,
         status: upstream.status,
         stream: true,
+        ttftMs,
         promptTokens: usage.inputTokens,
         completionTokens: usage.outputTokens,
         reasoningTokens: usage.reasoningTokens,
@@ -742,6 +768,7 @@ export class RouterGateway {
         requestId,
         status: clientClosed ? 499 : 502,
         stream: true,
+        ttftMs,
         promptTokens: usage.inputTokens,
         completionTokens: usage.outputTokens,
         reasoningTokens: 0,
@@ -784,19 +811,19 @@ export class RouterGateway {
       client: clientName(req.headers['user-agent']),
       path,
       stream,
-      requestBody: capture(requestBodyText),
+      requestBody: this.bodyForLog(requestBodyText),
       requestHeaders: this.logHeaders({}),
       startedAt,
     });
     if (!sameProtocol) {
-      const message = `Upstream ${route.providerName} returned HTTP ${info.status}`;
+      const message = info.error ?? `Upstream ${route.providerName} returned HTTP ${info.status}`;
       sendJson(res, info.status, entryAdapter.encodeError(message, 'upstream_error'));
     } else {
       res.writeHead(info.status, {
         'content-type': upstream.headers.get('content-type') ?? 'application/json',
         'access-control-allow-origin': '*',
       });
-      res.end(info.responseBody);
+      res.end(info.responseBody ?? '');
     }
     this.repo.finishLog({
       requestId,
@@ -809,7 +836,7 @@ export class RouterGateway {
       cacheWriteTokens: 0,
       unrecognizedTokens: 0,
       totalTokens: 0,
-      responseBody: info.responseBody,
+      responseBody: this.bodyForLog(info.responseBody),
       responseHeaders: JSON.stringify(info.responseHeaders),
       error: info.error,
       retryTrace: info.retryTrace.length > 0 ? JSON.stringify(info.retryTrace) : null,
@@ -836,7 +863,7 @@ export class RouterGateway {
         client: clientName(req.headers['user-agent']),
         path,
         stream: false,
-        requestBody: body ? capture(body) : null,
+        requestBody: this.bodyForLog(body),
         requestHeaders: sanitizeHeaders(req.headers),
       });
       this.repo.finishLog({
@@ -894,6 +921,11 @@ export class RouterGateway {
 
   private secretKey(providerId: string): string {
     return `router:${providerId}`;
+  }
+
+  private bodyForLog(value: string | null): string | null {
+    if (!this.getConfig().captureBodies) return null;
+    return value === null ? null : capture(value);
   }
 
   private async fetchUpstream(url: string, init: RequestInit): Promise<Response> {

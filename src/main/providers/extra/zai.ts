@@ -66,7 +66,7 @@ export async function fetchZaiSnapshot(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${credential.value}`,
     Accept: 'application/json',
-    'User-Agent': 'TokenMonitor/0.4.0',
+    'User-Agent': 'TokenMonitor/0.4.6',
   };
   if (team) {
     headers['Bigmodel-Organization'] = credential.organizationId!;

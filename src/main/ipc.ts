@@ -17,6 +17,17 @@ const settingsPatchSchema = z.object({
       pace: z.boolean().optional(),
     })
     .optional(),
+  homeCards: z
+    .object({
+      quota: z.boolean().optional(),
+      health: z.boolean().optional(),
+      trend: z.boolean().optional(),
+      recent: z.boolean().optional(),
+    })
+    .optional(),
+  homeCardOrder: z.array(z.enum(['quota', 'health', 'trend', 'recent'])).max(4).optional(),
+  quotaVisibility: z.record(z.string(), z.boolean()).optional(),
+  trayShowRouterQuota: z.boolean().optional(),
   launchAtLogin: z.boolean().optional(),
   startHidden: z.boolean().optional(),
   hideOnBlur: z.boolean().optional(),
@@ -76,28 +87,6 @@ export function registerIpc(
     return controller.refreshQuota();
   });
 
-  ipcMain.handle(IPC.refreshLocalUsage, async (event, range: unknown) => {
-    assertTrusted(event, windows);
-    const parsed = z.enum(['today', '7d', '30d', 'all']).safeParse(range);
-    if (!parsed.success) throw new Error('Invalid usage range');
-    return controller.getLocalUsage(parsed.data);
-  });
-
-  ipcMain.handle(IPC.getSpeedSeries, async (event, range: unknown) => {
-    assertTrusted(event, windows);
-    const parsed = z.enum(['7d', '30d']).safeParse(range);
-    if (!parsed.success) throw new Error('Invalid speed range');
-    return controller.getSpeedSeries(parsed.data);
-  });
-
-  ipcMain.handle(IPC.getHistoryMetrics, async (event, range: unknown, force: unknown) => {
-    assertTrusted(event, windows);
-    const parsed = z.enum(['7d', '30d', 'all']).safeParse(range);
-    const forceParsed = z.boolean().optional().safeParse(force);
-    if (!parsed.success || !forceParsed.success) throw new Error('Invalid history range');
-    return controller.getHistoryMetrics(parsed.data, forceParsed.data ?? false);
-  });
-
   ipcMain.handle(IPC.getQuotaHistory, async (event, hours: unknown) => {
     assertTrusted(event, windows);
     const parsed = z.number().int().min(1).max(24 * 90).safeParse(hours);
@@ -152,46 +141,6 @@ export function registerIpc(
     return controller.clearProviderSecret(provider.data);
   });
 
-  ipcMain.handle(IPC.chooseLocalDb, async (event) => {
-    assertTrusted(event, windows);
-    const options = {
-      title: '选择 OpenCode 数据库',
-      properties: ['openFile'] as const,
-      filters: [
-        { name: 'SQLite 数据库', extensions: ['db', 'sqlite', 'sqlite3'] },
-        { name: '所有文件', extensions: ['*'] },
-      ],
-    };
-    const parent = windows.getMainWindow();
-    const result = parent
-      ? await dialog.showOpenDialog(parent, { ...options, properties: ['openFile'] })
-      : await dialog.showOpenDialog({ ...options, properties: ['openFile'] });
-    if (result.canceled || !result.filePaths[0]) return null;
-    controller.updateSettings({ localDataPath: result.filePaths[0] });
-    return result.filePaths[0];
-  });
-
-  ipcMain.handle(IPC.setSpeedEnabled, async (event, enabled: unknown) => {
-    assertTrusted(event, windows);
-    if (typeof enabled !== 'boolean') throw new Error('Invalid speed setting');
-    return controller.setSpeedEnabled(enabled);
-  });
-
-  ipcMain.handle(IPC.getSpeedConfig, (event) => {
-    assertTrusted(event, windows);
-    return controller.getSpeedConfig();
-  });
-
-  ipcMain.handle(IPC.testSpeedProxy, async (event) => {
-    assertTrusted(event, windows);
-    return controller.testSpeedProxy();
-  });
-
-  ipcMain.handle(IPC.clearSpeedSamples, async (event) => {
-    assertTrusted(event, windows);
-    return controller.clearSpeedSamples();
-  });
-
   ipcMain.handle(IPC.clearQuotaHistory, (event) => {
     assertTrusted(event, windows);
     return controller.clearQuotaHistory();
@@ -235,6 +184,7 @@ export function registerIpc(
     port: z.number().int().min(1024).max(65_535).optional(),
     apiKey: z.string().max(500).optional(),
     proxyUrl: z.string().max(2000).optional(),
+    captureBodies: z.boolean().optional(),
   });
   const routerBalancePatchSchema = z.object({
     enabled: z.boolean().optional(),
@@ -313,6 +263,22 @@ export function registerIpc(
     return controller.deleteRouterModel(parsed.data);
   });
 
+  ipcMain.handle(IPC.renameRouterModelGroup, (event, from: unknown, to: unknown) => {
+    assertTrusted(event, windows);
+    const fromParsed = z.string().min(1).max(200).safeParse(from);
+    const toParsed = z.string().min(1).max(200).safeParse(to);
+    if (!fromParsed.success || !toParsed.success) throw new Error('Invalid model group name');
+    return controller.renameRouterModelGroup(fromParsed.data, toParsed.data);
+  });
+
+  ipcMain.handle(IPC.setRouterModelGroupEnabled, (event, publicName: unknown, enabled: unknown) => {
+    assertTrusted(event, windows);
+    const nameParsed = z.string().min(1).max(200).safeParse(publicName);
+    const enabledParsed = z.boolean().safeParse(enabled);
+    if (!nameParsed.success || !enabledParsed.success) throw new Error('Invalid model group update');
+    return controller.setRouterModelGroupEnabled(nameParsed.data, enabledParsed.data);
+  });
+
   ipcMain.handle(IPC.getRouterServiceConfig, (event) => {
     assertTrusted(event, windows);
     return controller.getRouterServiceConfig();
@@ -347,6 +313,20 @@ export function registerIpc(
     const parsed = z.enum(['today', '24h', '7d', '30d']).safeParse(range);
     if (!parsed.success) throw new Error('Invalid router usage range');
     return controller.getRouterUsage(parsed.data);
+  });
+
+  ipcMain.handle(IPC.getRouterActivity, (event, days: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = z.number().int().min(1).max(90).safeParse(days);
+    if (!parsed.success) throw new Error('Invalid router activity range');
+    return controller.getRouterActivity(parsed.data);
+  });
+
+  ipcMain.handle(IPC.getRouterFlow, (event, days: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = z.number().int().min(1).max(7).safeParse(days);
+    if (!parsed.success) throw new Error('Invalid router flow range');
+    return controller.getRouterFlow(parsed.data);
   });
 
   ipcMain.handle(IPC.getRouterLogs, (event, query: unknown) => {

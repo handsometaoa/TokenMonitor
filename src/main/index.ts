@@ -1,4 +1,4 @@
-import { app, dialog, net, powerMonitor } from 'electron';
+import { app, net, powerMonitor } from 'electron';
 import { AppController } from './appController';
 import type { FetchLike } from './providers/opencodeGo/api';
 import { registerIpc } from './ipc';
@@ -50,21 +50,6 @@ if (!gotLock) {
 
     const quit = async () => {
       if (quitting) return;
-      const state = controller?.getState();
-      if (state?.settings.speed.enabled && state.speed.configApplied) {
-        const result = await dialog.showMessageBox({
-          type: 'warning',
-          title: '精确测速仍在运行',
-          message: '退出后 OpenCode 的本机代理将停止',
-          detail:
-            '你的 OpenCode 配置可能仍指向本机测速代理。退出 TokenMonitor 后，相关请求会失败。请先在设置中把 baseURL 恢复为原值，或确认不再使用该 OpenCode 配置。',
-          buttons: ['取消', '仍然退出'],
-          defaultId: 0,
-          cancelId: 0,
-          noLink: true,
-        });
-        if (result.response !== 1) return;
-      }
       await shutdown();
     };
 
