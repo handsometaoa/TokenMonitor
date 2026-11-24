@@ -171,6 +171,14 @@ export function Logs({ onError }: { onError: (message: string) => void }) {
               <strong>{formatRouterDuration(selected.durationMs)}</strong>
             </div>
             <div>
+              <span>输出速度</span>
+              <strong>
+                {selected.durationMs != null && selected.ttftMs != null && selected.durationMs > selected.ttftMs
+                  ? `${((selected.completionTokens / (selected.durationMs - selected.ttftMs)) * 1000).toFixed(1)} tok/s`
+                  : '—'}
+              </strong>
+            </div>
+            <div>
               <span>Prompt</span>
               <strong>{selected.promptTokens.toLocaleString()}</strong>
             </div>

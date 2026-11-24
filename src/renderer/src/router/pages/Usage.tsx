@@ -57,6 +57,7 @@ function UsageTable({ title, rows }: { title: string; rows: RouterUsageGroup[] }
             <th>缓存</th>
             <th>平均耗时</th>
             <th>TTFT</th>
+            <th>输出速度</th>
           </tr>
         </thead>
         <tbody>
@@ -69,11 +70,12 @@ function UsageTable({ title, rows }: { title: string; rows: RouterUsageGroup[] }
               <td className="mono">{formatRouterTokens(row.cacheReadTokens)}</td>
               <td className="mono">{row.requestCount > 0 ? formatRouterDuration(row.durationMs / row.requestCount) : '—'}</td>
               <td className="mono">{row.ttftSamples > 0 ? formatRouterDuration(row.ttftMs / row.ttftSamples) : '—'}</td>
+              <td className="mono">{row.generationMs > 0 ? `${((row.completionTokens / row.generationMs) * 1000).toFixed(1)} tok/s` : '—'}</td>
             </tr>
           ))}
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={7}>
+              <td colSpan={8}>
                 <div className="router-empty-inline">该区间没有数据。</div>
               </td>
             </tr>
@@ -491,6 +493,11 @@ export function Usage({ onError }: { onError: (message: string) => void }) {
           label="平均 TTFT"
           value={totals && totals.ttftSamples > 0 ? formatRouterDuration(totals.ttftMs / totals.ttftSamples) : '—'}
           hint={`首 token 延迟 · ${totals?.ttftSamples ?? 0} 个样本`}
+        />
+        <RouterStat
+          label="输出速度"
+          value={totals && totals.generationMs > 0 ? `${((totals.completionTokens / totals.generationMs) * 1000).toFixed(1)} tok/s` : '—'}
+          hint={`输出 ${formatRouterTokens(totals?.completionTokens ?? 0)} tokens / 生成 ${totals && totals.generationMs > 0 ? formatRouterDuration(totals.generationMs) : '—'}`}
         />
         <RouterStat
           label="平均耗时"

@@ -24,7 +24,7 @@ import type {
 } from '../../shared/routerTypes';
 import { DEFAULT_ROUTER_BALANCE, DEFAULT_ROUTER_PORT } from '../../shared/routerTypes';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 export interface RouterProviderRow {
   id: string;
@@ -116,6 +116,7 @@ const EMPTY_TOTALS: RouterUsageTotals = {
   durationMs: 0,
   ttftMs: 0,
   ttftSamples: 0,
+  generationMs: 0,
   promptTokens: 0,
   completionTokens: 0,
   reasoningTokens: 0,
@@ -163,6 +164,7 @@ function addTotals(target: RouterUsageTotals, source: RouterUsageTotals): void {
   target.durationMs += source.durationMs;
   target.ttftMs += source.ttftMs;
   target.ttftSamples += source.ttftSamples;
+  target.generationMs += source.generationMs;
   target.promptTokens += source.promptTokens;
   target.completionTokens += source.completionTokens;
   target.reasoningTokens += source.reasoningTokens;
@@ -205,8 +207,18 @@ export class RouterRepository {
         ALTER TABLE usage_daily ADD COLUMN ttft_samples INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE usage_hourly ADD COLUMN ttft_ms INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE usage_hourly ADD COLUMN ttft_samples INTEGER NOT NULL DEFAULT 0;
-        PRAGMA user_version = ${SCHEMA_VERSION};
       `);
+    }
+    if (version >= 1 && version < 3) {
+      // v2 → v3: track generation time (duration minus TTFT) for output tok/s.
+      // Only for existing databases; fresh ones get the columns from CREATE TABLE below.
+      this.db.exec(`
+        ALTER TABLE usage_daily ADD COLUMN generation_ms INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE usage_hourly ADD COLUMN generation_ms INTEGER NOT NULL DEFAULT 0;
+      `);
+    }
+    if (version >= 1) {
+      this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
       return;
     }
     this.db.exec(`
@@ -290,6 +302,7 @@ export class RouterRepository {
         duration_ms INTEGER NOT NULL DEFAULT 0,
         ttft_ms INTEGER NOT NULL DEFAULT 0,
         ttft_samples INTEGER NOT NULL DEFAULT 0,
+        generation_ms INTEGER NOT NULL DEFAULT 0,
         prompt_tokens INTEGER NOT NULL DEFAULT 0,
         completion_tokens INTEGER NOT NULL DEFAULT 0,
         reasoning_tokens INTEGER NOT NULL DEFAULT 0,
@@ -312,6 +325,7 @@ export class RouterRepository {
         duration_ms INTEGER NOT NULL DEFAULT 0,
         ttft_ms INTEGER NOT NULL DEFAULT 0,
         ttft_samples INTEGER NOT NULL DEFAULT 0,
+        generation_ms INTEGER NOT NULL DEFAULT 0,
         prompt_tokens INTEGER NOT NULL DEFAULT 0,
         completion_tokens INTEGER NOT NULL DEFAULT 0,
         reasoning_tokens INTEGER NOT NULL DEFAULT 0,
@@ -715,6 +729,7 @@ export class RouterRepository {
       durationMs,
       ttftMs: ttftMs ?? 0,
       ttftSamples: ttftMs != null ? 1 : 0,
+      generationMs: success && ttftMs != null ? Math.max(0, durationMs - ttftMs) : 0,
       promptTokens: success ? input.promptTokens : 0,
       completionTokens: success ? input.completionTokens : 0,
       reasoningTokens: success ? input.reasoningTokens : 0,
@@ -745,10 +760,10 @@ export class RouterRepository {
         .prepare(`
           INSERT INTO ${table} (
             ${keyColumn}, provider_name, public_model, provider_id, model_id,
-            request_count, success_count, fail_count, duration_ms, ttft_ms, ttft_samples,
+            request_count, success_count, fail_count, duration_ms, ttft_ms, ttft_samples, generation_ms,
             prompt_tokens, completion_tokens, reasoning_tokens, cache_read_tokens,
             cache_write_tokens, unrecognized_tokens, total_tokens
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(${keyColumn}, provider_name, public_model) DO UPDATE SET
             request_count = request_count + excluded.request_count,
             success_count = success_count + excluded.success_count,
@@ -756,6 +771,7 @@ export class RouterRepository {
             duration_ms = duration_ms + excluded.duration_ms,
             ttft_ms = ttft_ms + excluded.ttft_ms,
             ttft_samples = ttft_samples + excluded.ttft_samples,
+            generation_ms = generation_ms + excluded.generation_ms,
             prompt_tokens = prompt_tokens + excluded.prompt_tokens,
             completion_tokens = completion_tokens + excluded.completion_tokens,
             reasoning_tokens = reasoning_tokens + excluded.reasoning_tokens,
@@ -776,6 +792,7 @@ export class RouterRepository {
           totals.durationMs,
           totals.ttftMs,
           totals.ttftSamples,
+          totals.generationMs,
           totals.promptTokens,
           totals.completionTokens,
           totals.reasoningTokens,
@@ -921,6 +938,7 @@ export class RouterRepository {
         durationMs: Number(row.duration_ms) || 0,
         ttftMs: Number(row.ttft_ms) || 0,
         ttftSamples: Number(row.ttft_samples) || 0,
+        generationMs: Number(row.generation_ms) || 0,
         promptTokens: Number(row.prompt_tokens) || 0,
         completionTokens: Number(row.completion_tokens) || 0,
         reasoningTokens: Number(row.reasoning_tokens) || 0,

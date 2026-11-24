@@ -116,6 +116,8 @@ export interface RouterUsageTotals {
   durationMs: number;
   ttftMs: number;
   ttftSamples: number;
+  /** Sum of per-request generation time (total duration minus TTFT); basis for output tok/s. */
+  generationMs: number;
   promptTokens: number;
   completionTokens: number;
   reasoningTokens: number;
