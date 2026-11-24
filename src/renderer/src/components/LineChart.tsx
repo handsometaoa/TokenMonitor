@@ -10,14 +10,10 @@ export interface LineSeries {
 }
 
 function niceMax(value: number): number {
-  if (value <= 10) return 10;
-  if (value <= 20) return 20;
-  if (value <= 40) return 40;
-  if (value <= 60) return 60;
-  if (value <= 80) return 80;
-  if (value <= 100) return 100;
+  if (!Number.isFinite(value) || value <= 0) return 1;
   const magnitude = 10 ** Math.floor(Math.log10(value));
-  return Math.ceil(value / magnitude) * magnitude;
+  const normalized = value / magnitude;
+  return (Math.ceil(normalized * 2) / 2) * magnitude;
 }
 
 function smoothPath(points: Array<{ x: number; y: number }>): string {
@@ -121,7 +117,7 @@ export function LineChart({
                 strokeDasharray={tick === 0 ? undefined : '3 5'}
               />
               <text x={margin.left - 6} y={y + 3.5} textAnchor="end" fontSize="9" fill="var(--faint)" className="mono">
-                {Math.round(tick)}
+                {maxValue < 10 ? tick.toFixed(1) : Math.round(tick)}
               </text>
             </g>
           );

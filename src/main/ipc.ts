@@ -90,6 +90,14 @@ export function registerIpc(
     return controller.getSpeedSeries(parsed.data);
   });
 
+  ipcMain.handle(IPC.getHistoryMetrics, async (event, range: unknown, force: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = z.enum(['7d', '30d', 'all']).safeParse(range);
+    const forceParsed = z.boolean().optional().safeParse(force);
+    if (!parsed.success || !forceParsed.success) throw new Error('Invalid history range');
+    return controller.getHistoryMetrics(parsed.data, forceParsed.data ?? false);
+  });
+
   ipcMain.handle(IPC.getQuotaHistory, async (event, hours: unknown) => {
     assertTrusted(event, windows);
     const parsed = z.number().int().min(1).max(24 * 90).safeParse(hours);

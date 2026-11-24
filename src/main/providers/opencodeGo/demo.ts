@@ -1,4 +1,8 @@
 import type {
+  HistoryMetrics,
+  HistoryMetricsModel,
+  HistoryMetricsPoint,
+  HistoryRange,
   LocalUsageDay,
   LocalUsageModel,
   LocalUsageRange,
@@ -189,3 +193,182 @@ export function buildDemoSpeedSeries(range: SpeedRange): SpeedSeries {
 }
 
 export const DEMO_DAY_MS = DAY_MS;
+
+interface DemoHistoryAccumulator {
+  steps: number;
+  turns: number;
+  turnMs: number;
+  ttftWeighted: number;
+  p95Weighted: number;
+  outputTokens: number;
+  inputTokens: number;
+  cacheRead: number;
+  generationMs: number;
+  prefillSeconds: number;
+}
+
+function emptyHistoryAccumulator(): DemoHistoryAccumulator {
+  return {
+    steps: 0,
+    turns: 0,
+    turnMs: 0,
+    ttftWeighted: 0,
+    p95Weighted: 0,
+    outputTokens: 0,
+    inputTokens: 0,
+    cacheRead: 0,
+    generationMs: 0,
+    prefillSeconds: 0,
+  };
+}
+
+function historyPoint(day: string, accumulator: DemoHistoryAccumulator): HistoryMetricsPoint {
+  const avgTtft = accumulator.steps > 0 ? accumulator.ttftWeighted / accumulator.steps : null;
+  return {
+    day,
+    steps: accumulator.steps,
+    turns: accumulator.turns,
+    avgTtftMs: avgTtft,
+    outputTps:
+      accumulator.generationMs > 0 ? accumulator.outputTokens / (accumulator.generationMs / 1000) : null,
+    prefillTps:
+      accumulator.prefillSeconds > 0 ? accumulator.inputTokens / accumulator.prefillSeconds : null,
+    turnMs: accumulator.turns > 0 ? accumulator.turnMs / accumulator.turns : null,
+  };
+}
+
+export function buildDemoHistoryMetrics(range: HistoryRange): HistoryMetrics {
+  const count = range === '7d' ? 7 : range === '30d' ? 30 : 90;
+  const now = new Date();
+  const days: HistoryMetricsPoint[] = [];
+  const dayAccumulators = new Map<string, DemoHistoryAccumulator>();
+  const models = new Map<
+    string,
+    {
+      provider: string;
+      model: string;
+      totals: DemoHistoryAccumulator;
+      points: HistoryMetricsPoint[];
+    }
+  >();
+  const totals = emptyHistoryAccumulator();
+  let totalP95 = 0;
+  let totalCacheRead = 0;
+
+  for (let index = count - 1; index >= 0; index -= 1) {
+    const date = addDays(now, -index);
+    const dayKey = localDayKey(date);
+    const daySeed = Number(dayKey.replaceAll('-', ''));
+    const dayAccumulator = emptyHistoryAccumulator();
+    dayAccumulators.set(dayKey, dayAccumulator);
+
+    for (const [modelIndex, model] of DEMO_MODELS.entries()) {
+      const random = seededRandom(daySeed + modelIndex * 97);
+      const steps = 4 + Math.round(random() * 10);
+      const turns = Math.max(1, Math.round(steps / (4 + random() * 4)));
+      const turnMs = 5_500 + random() * 38_000;
+      const ttftMs = 320 + random() * 780;
+      const outputTps = 38 + random() * 34;
+      const prefillTps = 700 + random() * 1_900;
+      const outputTokens = Math.round(steps * (180 + random() * 380));
+      const inputTokens = Math.round(steps * (90 + random() * 180));
+      const cacheRead = Math.round(inputTokens * (5 + random() * 6));
+      const generationMs = (outputTokens / outputTps) * 1_000;
+      const prefillSeconds = inputTokens / prefillTps;
+      const p95TtftMs = ttftMs * (1.45 + random() * 0.5);
+
+      const key = `${model.provider}\u0000${model.model}`;
+      const entry = models.get(key) ?? {
+        provider: model.provider,
+        model: model.model,
+        totals: emptyHistoryAccumulator(),
+        points: [] as HistoryMetricsPoint[],
+      };
+      const modelDay = emptyHistoryAccumulator();
+      for (const accumulator of [dayAccumulator, entry.totals, totals]) {
+        accumulator.steps += steps;
+        accumulator.turns += turns;
+        accumulator.turnMs += turnMs * turns;
+        accumulator.ttftWeighted += ttftMs * steps;
+        accumulator.p95Weighted += p95TtftMs * steps;
+        accumulator.outputTokens += outputTokens;
+        accumulator.inputTokens += inputTokens;
+        accumulator.cacheRead += cacheRead;
+        accumulator.generationMs += generationMs;
+        accumulator.prefillSeconds += prefillSeconds;
+      }
+      modelDay.steps = steps;
+      modelDay.turns = turns;
+      modelDay.turnMs = turnMs * turns;
+      modelDay.ttftWeighted = ttftMs * steps;
+      modelDay.p95Weighted = p95TtftMs * steps;
+      modelDay.outputTokens = outputTokens;
+      modelDay.inputTokens = inputTokens;
+      modelDay.cacheRead = cacheRead;
+      modelDay.generationMs = generationMs;
+      modelDay.prefillSeconds = prefillSeconds;
+      entry.points.push(historyPoint(dayKey, modelDay));
+      entry.points.sort((a, b) => a.day.localeCompare(b.day));
+      models.set(key, entry);
+      totalP95 += p95TtftMs * steps;
+      totalCacheRead += cacheRead;
+    }
+
+    days.push(historyPoint(dayKey, dayAccumulator));
+  }
+
+  const inputSide = totals.inputTokens + totals.cacheRead;
+  const modelList: HistoryMetricsModel[] = [...models.values()]
+    .map((entry) => ({
+      provider: entry.provider,
+      model: entry.model,
+      steps: entry.totals.steps,
+      turns: entry.totals.turns,
+      outputTokens: entry.totals.outputTokens,
+      inputTokens: entry.totals.inputTokens,
+      cacheReadTokens: entry.totals.cacheRead,
+      generationMs: entry.totals.generationMs,
+      avgTtftMs: entry.totals.steps > 0 ? entry.totals.ttftWeighted / entry.totals.steps : null,
+      p95TtftMs: entry.totals.steps > 0 ? entry.totals.p95Weighted / entry.totals.steps : null,
+      outputTps:
+        entry.totals.generationMs > 0
+          ? entry.totals.outputTokens / (entry.totals.generationMs / 1000)
+          : null,
+      prefillTps:
+        entry.totals.prefillSeconds > 0
+          ? entry.totals.inputTokens / entry.totals.prefillSeconds
+          : null,
+      turnMs: entry.totals.turns > 0 ? entry.totals.turnMs / entry.totals.turns : null,
+      cacheHitPercent:
+        entry.totals.inputTokens + entry.totals.cacheRead > 0
+          ? (entry.totals.cacheRead / (entry.totals.inputTokens + entry.totals.cacheRead)) * 100
+          : null,
+      points: entry.points.sort((a, b) => a.day.localeCompare(b.day)),
+    }))
+    .sort((a, b) => b.steps - a.steps);
+
+  return {
+    range,
+    generatedAt: Date.now(),
+    dbPath: '演示数据',
+    source: 'demo',
+    totals: {
+      steps: totals.steps,
+      turns: totals.turns,
+      outputTokens: totals.outputTokens,
+      inputTokens: totals.inputTokens,
+      cacheReadTokens: totalCacheRead,
+      generationMs: totals.generationMs,
+      avgTtftMs: totals.steps > 0 ? totals.ttftWeighted / totals.steps : null,
+      p50TtftMs: totals.steps > 0 ? (totals.ttftWeighted / totals.steps) * 0.92 : null,
+      p95TtftMs: totals.steps > 0 ? totalP95 / totals.steps : null,
+      outputTps: totals.generationMs > 0 ? totals.outputTokens / (totals.generationMs / 1000) : null,
+      prefillTps: totals.prefillSeconds > 0 ? totals.inputTokens / totals.prefillSeconds : null,
+      turnMs: totals.turns > 0 ? totals.turnMs / totals.turns : null,
+      cacheHitPercent: inputSide > 0 ? (totalCacheRead / inputSide) * 100 : null,
+    },
+    days,
+    models: modelList,
+    approximate: true,
+  };
+}

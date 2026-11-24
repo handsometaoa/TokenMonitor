@@ -8,6 +8,8 @@ import type {
   CredentialStatus,
   CredentialTestResult,
   ExtraProviderId,
+  HistoryMetrics,
+  HistoryRange,
   LocalUsageRange,
   LocalUsageSummary,
   QuotaHistoryPoint,
@@ -20,6 +22,7 @@ import { EXTRA_PROVIDER_IDS } from '../shared/types';
 import { CredentialResolver } from './services/credentials';
 import { QuotaHistory } from './services/history';
 import { LocalUsageService } from './providers/opencodeGo/localUsage';
+import { SessionMetricsService } from './providers/opencodeGo/sessionMetrics';
 import type { FetchLike } from './providers/opencodeGo/api';
 import { ExtraProviderService } from './providers/extra/service';
 import { Logger } from './services/logger';
@@ -40,6 +43,7 @@ export class AppController extends EventEmitter {
   readonly history: QuotaHistory;
   readonly quota: QuotaService;
   readonly localUsage: LocalUsageService;
+  readonly sessionMetrics: SessionMetricsService;
   readonly speed: SpeedManager;
   readonly speedStore: SpeedStore;
   readonly extraSecrets: ProviderSecretStore;
@@ -61,6 +65,7 @@ export class AppController extends EventEmitter {
     this.history = new QuotaHistory(baseDir, this.logger);
     this.speedStore = new SpeedStore(baseDir, this.logger);
     this.localUsage = new LocalUsageService(this.settings, this.logger, demo);
+    this.sessionMetrics = new SessionMetricsService(this.settings, this.logger, demo);
     const notifier = new QuotaNotifierService(this.settings, showWindow, demo);
     this.quota = new QuotaService(
       this.settings,
@@ -148,6 +153,10 @@ export class AppController extends EventEmitter {
     return this.speed.getSeries(range);
   }
 
+  async getHistoryMetrics(range: HistoryRange, force = false): Promise<HistoryMetrics> {
+    return this.sessionMetrics.getMetrics(range, force);
+  }
+
   updateSettings(patch: UpdateSettingsPatch): AppState {
     const before = this.settings.get();
     const after = this.settings.update(patch);
@@ -159,7 +168,10 @@ export class AppController extends EventEmitter {
       this.quota.reconfigure();
       this.extraProviders.reconfigure();
     }
-    if (before.localDataPath !== after.localDataPath) this.localUsage.clearCache();
+    if (before.localDataPath !== after.localDataPath) {
+      this.localUsage.clearCache();
+      this.sessionMetrics.clearCache();
+    }
     if (before.launchAtLogin !== after.launchAtLogin) this.applyLoginItem(after);
     this.emit('state');
     return this.getState();

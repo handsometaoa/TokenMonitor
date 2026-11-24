@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import type { LocalUsageRange, LocalUsageSummary, SpeedRange, SpeedSeries, Theme } from '../../shared/types';
+import type {
+  HistoryMetrics,
+  HistoryRange,
+  LocalUsageRange,
+  LocalUsageSummary,
+  SpeedRange,
+  SpeedSeries,
+  Theme,
+} from '../../shared/types';
 
 export function useNow(intervalMs = 1000): number {
   const [now, setNow] = useState(() => Date.now());
@@ -92,6 +100,41 @@ export function useSpeedSeries(range: SpeedRange, enabled: boolean) {
   }, [range, enabled]);
 
   return { series, loading, error, reload: load };
+}
+
+export function useHistoryMetrics(range: HistoryRange, enabled: boolean) {
+  const [metrics, setMetrics] = useState<HistoryMetrics | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const requestId = useRef(0);
+
+  const load = async (force = false) => {
+    if (!enabled) {
+      setMetrics(null);
+      setLoading(false);
+      return;
+    }
+    const id = ++requestId.current;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await window.tokenMonitor.getHistoryMetrics(range, force);
+      if (id === requestId.current) setMetrics(result);
+    } catch (reason) {
+      if (id === requestId.current) {
+        setError(reason instanceof Error ? reason.message : 'Could not read session history');
+      }
+    } finally {
+      if (id === requestId.current) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, enabled]);
+
+  return { metrics, loading, error, reload: () => load(true) };
 }
 
 export function useCopy() {

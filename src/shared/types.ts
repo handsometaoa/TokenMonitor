@@ -1,5 +1,5 @@
 export const APP_NAME = 'TokenMonitor';
-export const APP_VERSION = '0.2.2';
+export const APP_VERSION = '0.3.0';
 export const QUOTA_API_URL = 'https://opencode.ai/zen/go/v1/usage';
 
 export type QuotaWindowId = 'rolling' | 'weekly' | 'monthly';
@@ -231,6 +231,7 @@ export interface LocalUsageSummary {
 }
 
 export type SpeedRange = '7d' | '30d';
+export type HistoryRange = SpeedRange | 'all';
 
 export interface SpeedPoint {
   day: string;
@@ -262,6 +263,64 @@ export interface SpeedStatus {
   lastSampleAt: number | null;
   configApplied: boolean;
   error: string | null;
+}
+
+export type HistoryMetricKey = 'ttft' | 'output' | 'prefill' | 'turn';
+
+export interface HistoryMetricsPoint {
+  day: string;
+  steps: number;
+  turns: number;
+  avgTtftMs: number | null;
+  outputTps: number | null;
+  prefillTps: number | null;
+  turnMs: number | null;
+}
+
+export interface HistoryMetricsModel {
+  provider: string;
+  model: string;
+  steps: number;
+  turns: number;
+  outputTokens: number;
+  inputTokens: number;
+  cacheReadTokens: number;
+  generationMs: number;
+  avgTtftMs: number | null;
+  p95TtftMs: number | null;
+  outputTps: number | null;
+  prefillTps: number | null;
+  turnMs: number | null;
+  cacheHitPercent: number | null;
+  points: HistoryMetricsPoint[];
+}
+
+export interface HistoryMetricsTotals {
+  steps: number;
+  turns: number;
+  outputTokens: number;
+  inputTokens: number;
+  cacheReadTokens: number;
+  generationMs: number;
+  avgTtftMs: number | null;
+  p50TtftMs: number | null;
+  p95TtftMs: number | null;
+  outputTps: number | null;
+  prefillTps: number | null;
+  turnMs: number | null;
+  cacheHitPercent: number | null;
+}
+
+export interface HistoryMetrics {
+  range: HistoryRange;
+  generatedAt: number;
+  dbPath: string;
+  source: 'sqlite' | 'demo' | 'none';
+  totals: HistoryMetricsTotals;
+  days: HistoryMetricsPoint[];
+  models: HistoryMetricsModel[];
+  approximate: true;
+  error?: LocalUsageError;
 }
 
 export interface SpeedConfigInfo {

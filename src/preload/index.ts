@@ -8,6 +8,7 @@ const api: TokenMonitorApi = {
   refreshQuota: () => ipcRenderer.invoke(IPC.refreshQuota),
   refreshLocalUsage: (range) => ipcRenderer.invoke(IPC.refreshLocalUsage, range),
   getSpeedSeries: (range) => ipcRenderer.invoke(IPC.getSpeedSeries, range),
+  getHistoryMetrics: (range, force) => ipcRenderer.invoke(IPC.getHistoryMetrics, range, force),
   getQuotaHistory: (hours) => ipcRenderer.invoke(IPC.getQuotaHistory, hours),
   updateSettings: (patch) => ipcRenderer.invoke(IPC.updateSettings, patch),
   detectCredential: () => ipcRenderer.invoke(IPC.detectCredential),

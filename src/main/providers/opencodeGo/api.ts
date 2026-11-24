@@ -136,7 +136,7 @@ export class OpenCodeGoUsageApi {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${apiKey}`,
       Accept: 'application/json',
-      'User-Agent': 'TokenMonitor/0.2.2',
+      'User-Agent': 'TokenMonitor/0.3.0',
     };
     if (orgId.trim()) headers['x-opencode-org-id'] = orgId.trim();
 

@@ -3,6 +3,8 @@ import type {
   AppState,
   CredentialDetection,
   CredentialTestResult,
+  HistoryMetrics,
+  HistoryRange,
   LocalUsageRange,
   LocalUsageSummary,
   QuotaHistoryPoint,
@@ -18,6 +20,7 @@ export interface TokenMonitorApi {
   refreshQuota(): Promise<AppState>;
   refreshLocalUsage(range: LocalUsageRange): Promise<LocalUsageSummary>;
   getSpeedSeries(range: SpeedRange): Promise<SpeedSeries>;
+  getHistoryMetrics(range: HistoryRange, force?: boolean): Promise<HistoryMetrics>;
   getQuotaHistory(hours: number): Promise<QuotaHistoryPoint[]>;
   updateSettings(patch: UpdateSettingsPatch): Promise<AppState>;
   detectCredential(): Promise<CredentialDetection>;
@@ -47,6 +50,7 @@ export const IPC = {
   refreshQuota: 'quota:refresh',
   refreshLocalUsage: 'local:refresh',
   getSpeedSeries: 'speed:series',
+  getHistoryMetrics: 'speed:history-metrics',
   getQuotaHistory: 'quota:history',
   updateSettings: 'settings:update',
   detectCredential: 'credentials:detect',
