@@ -428,7 +428,9 @@ export class SpeedProxyService extends EventEmitter {
     state: ParserState,
     requestModel: string | null,
   ): void {
-    if (state.outputTokens <= 0) return;
+    // TTFT does not require upstream usage. Keep the sample whenever a first content
+    // chunk was observed; output token fields simply stay unknown when usage is absent.
+    if (state.outputTokens <= 0 && firstChunkAt === null) return;
     const first = firstChunkAt ?? headersAt;
     const last = lastChunkAt ?? headersAt;
     const durationMs = Math.max(1, last - first);
@@ -441,10 +443,12 @@ export class SpeedProxyService extends EventEmitter {
       durationMs,
       outputTokens: state.outputTokens,
       inputTokens: state.inputTokens,
-      tokenSource: 'upstream',
+      tokenSource: state.outputTokens > 0 ? 'upstream' : 'unknown',
     };
     this.store.append(record);
-    this.logger.info(`Speed sample: ${record.model} ${record.outputTokens} tokens in ${durationMs}ms.`);
+    this.logger.info(
+      `Speed sample: ${record.model} ${record.outputTokens > 0 ? `${record.outputTokens} tokens` : 'TTFT-only'} in ${durationMs}ms (TTFT ${ttftMs}ms).`,
+    );
     this.emit('sample', record);
     this.emit('status');
   }

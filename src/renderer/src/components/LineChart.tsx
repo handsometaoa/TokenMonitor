@@ -44,12 +44,14 @@ export function LineChart({
   language,
   yMax: fixedYMax,
   unit = '',
+  digits = 1,
 }: {
   series: LineSeries[];
   height?: number;
   language: Language;
   yMax?: number;
   unit?: string;
+  digits?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(420);
@@ -194,7 +196,7 @@ export function LineChart({
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
               </span>
               <span className="mono" style={{ fontWeight: 650, whiteSpace: 'nowrap' }}>
-                {point.value.toFixed(1)}
+                {point.value.toFixed(digits)}
                 {unit}
               </span>
             </div>

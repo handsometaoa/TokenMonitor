@@ -1,5 +1,5 @@
 export const APP_NAME = 'TokenMonitor';
-export const APP_VERSION = '0.2.1';
+export const APP_VERSION = '0.2.2';
 export const QUOTA_API_URL = 'https://opencode.ai/zen/go/v1/usage';
 
 export type QuotaWindowId = 'rolling' | 'weekly' | 'monthly';

@@ -29,7 +29,7 @@ if (demo) {
   await page.getByRole('button', { name: /本地用量/ }).click();
   await page.waitForTimeout(900);
   await page.screenshot({ path: join(outDir, 'ui-demo-local.png') });
-  await page.getByRole('button', { name: /速度/ }).click();
+  await page.getByRole('button', { name: /TTFT/ }).click();
   await page.waitForTimeout(700);
   await page.screenshot({ path: join(outDir, 'ui-demo-speed.png') });
 } else {

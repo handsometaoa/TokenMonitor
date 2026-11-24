@@ -10,7 +10,7 @@ Windows 托盘版 OpenCode Go 余量监控，参考 [CodexBar](https://github.co
 - **OpenCode Go 三窗口余量**：5 小时、每周、每月；显示剩余/已用百分比、重置倒计时、限流状态。
 - **pace 节奏预测**：按窗口时间进度比较实际消耗，提示“余量充足 / 节奏正常 / 偏快”。
 - **本地 token 统计**：只读 OpenCode SQLite，按今日 / 7 天 / 30 天 / 全部展示 token、会话、模型排行。
-- **模型速度趋势**：可选开启本地测速代理，记录 TTFT 与 tok/s（实验性）。
+- **TTFT 趋势**：可选开启本地测速代理，按模型记录首 token 延迟；有 usage 时附带 tok/s（实验性）。
 - **Codex 额度重置积分**：显示可用重置次数与下一次过期倒计时。
 - **Provider 状态/事件**：拉取 OpenAI / Anthropic / Cursor 的公开 Statuspage，显示服务降级、事件数量和受影响组件。
 - **Windows 原生体验**：系统托盘、flyout 面板、Toast 通知、开机自启、单实例、深色/浅色主题。
@@ -72,7 +72,7 @@ npm run dist:win
    - Windows：`%USERPROFILE%\.local\share\opencode\opencode.db`
    - macOS：`~/.local/share/opencode/opencode.db`
 4. 需要更多 Provider 时，打开“设置 → 多 Provider”，先登录对应客户端（Codex / Claude），或填 API Key / Cookie。
-5. 需要更细的模型速度数据时，在“设置 → 精确测速”中启用测速代理。
+5. 需要按模型查看 TTFT 时，在“设置 → 精确测速”中启用测速代理。
 
 本机如果只有其他 Provider 的凭证（例如 DeepSeek），不会被读取或展示；OpenCode 额度必须使用 OpenCode Go 的 Key。其他 Provider 的凭证只在各自设置中读取。
 
@@ -81,11 +81,13 @@ npm run dist:win
 精确测速不是 CodexBar 的原有功能，是本项目的扩展：
 
 - 应用在 `127.0.0.1` 启动一个本地反向代理，记录请求时间、TTFT、流式输出时长和上游 usage。
+- **TTFT 是主指标**：从请求开始到第一个内容 chunk；即使上游不返回 usage，TTFT 仍会记录。
+- tok/s 仅在拿到上游 usage 时作为辅助指标显示；没有 usage 时为“—”。
 - 需要在 OpenCode 配置里把 Go Provider 的 `baseURL` 指向本机代理，并把设置页生成的配置片段合并进去。
 - **应用退出后代理会停止**；如果配置仍指向代理，OpenCode 请求会失败。退出前请恢复原配置，或先关闭测速。
 - 代理只记录模型、时间、token 数；不落盘 prompt、回复、Authorization 或工具输出。
 - OpenCode 不同版本可能使用 `provider` 或 `providers` 配置结构，且 Provider ID 可能是 `opencode` 或 `opencode-go`；设置页会同时给出两种片段。
-- 如果上游不返回 usage，样本不会被标记为精确 tok/s。
+- 如果上游不返回 usage，tok/s 不可用；TTFT 不受影响。
 
 ## 数据与隐私
 
@@ -160,12 +162,12 @@ $env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"; npm install
 - Codex / Claude / Cursor 在 Windows 上没有统一的安全凭证存储；本工具优先读取各自客户端的本地登录文件，或使用手动 Token/Cookie。不会刷新 OAuth Token，过期后需要重新登录客户端或更新凭证。
 - Cursor 的本地 token 如果是 Chromium DPAPI 加密的 `cursor-safe-storage`，当前不会尝试解密；请粘贴 Cookie header 或 session token。
 - ZCode 自动读取当前激活的 Coding Plan 凭证；BigModel 团队版需要 Organization/Project 选择器，否则额度接口会返回“无 Coding Plan”。此时请在多 Provider 设置中粘贴团队 JSON。
-- 本地 token 统计和模型速度目前仍只针对 OpenCode；其他 Provider 只接额度。
+- 本地 token 统计和 TTFT 目前仍只针对 OpenCode；其他 Provider 只接额度。
 - 不显示金额、余额或 credits。Codex 只显示“重置积分次数”，不显示美元成本；本地成本扫描和美元支出未启用（此前选择“不显示金额”，若要恢复可以再开）。
 - 服务状态来自公开 Statuspage：OpenAI、Anthropic、Cursor；Z.AI/ZCode 暂未发现稳定状态页。
 - 状态页请求失败时显示“状态页不可用”，不影响额度卡片。
 - 精确测速需要手动修改 OpenCode 配置，属于实验性功能；目前支持 HTTP/SSE，不支持 WebSocket 传输的测速。
-- 测速的“精确”指请求计时和上游 usage；如果上游不返回 usage，样本不会进入 tok/s 图表。
+- 测速的“精确”指本机请求计时；TTFT 为主指标，tok/s 依赖上游 usage，缺失时不会伪造。
 - Windows 安装包未签名；macOS 未提供首版构建。
 - 本地数据库可能是 v1（`message`）或 v2（`session_message`）；混合迁移库按 message id 去重，但仍建议保留 OpenCode 原库，不要用本工具修改它。
 - Codex / Claude / Cursor / Z.AI / ZCode 的额度解析用 mock fixture 测试；没有用这些账号做真实端到端验证（本机只有 OpenCode 和 ZCode 本机凭证）。

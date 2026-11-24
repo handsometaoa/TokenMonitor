@@ -55,21 +55,33 @@ export function Speed({
           points,
           samples: sampleCount,
           avgTps: points.reduce((sum, point) => sum + point.tokensPerSecond * point.samples, 0) / weight,
-          avgTtft:
-            points.reduce((sum, point) => sum + (point.ttftMs ?? 0) * point.samples, 0) / weight,
+          avgTtft: (() => {
+            const ttftPoints = points.filter(
+              (point): point is SpeedPoint & { ttftMs: number } => point.ttftMs !== null,
+            );
+            const ttftSamples = ttftPoints.reduce((sum, point) => sum + point.samples, 0);
+            return ttftSamples > 0
+              ? ttftPoints.reduce((sum, point) => sum + point.ttftMs * point.samples, 0) / ttftSamples
+              : 0;
+          })(),
         };
       })
-      .sort((a, b) => b.samples - a.samples || a.model.localeCompare(b.model));
+      .sort((a, b) => (a.avgTtft || Number.MAX_SAFE_INTEGER) - (b.avgTtft || Number.MAX_SAFE_INTEGER) || b.samples - a.samples);
   }, [series]);
 
   const providerLabel = (provider: string) =>
     provider === 'opencode-go' || provider === 'opencode' ? 'OpenCode Go' : provider;
-  const chartSeries: LineSeries[] = models.slice(0, 6).map((model) => ({
-    key: model.key,
-    label: `${providerLabel(model.provider)} · ${model.model}`,
-    color: model.color,
-    points: model.points.map((point) => ({ day: point.day, value: point.tokensPerSecond })),
-  }));
+  const chartSeries: LineSeries[] = models
+    .slice(0, 6)
+    .map((model) => ({
+      key: model.key,
+      label: `${providerLabel(model.provider)} · ${model.model}`,
+      color: model.color,
+      points: model.points
+        .filter((point): point is SpeedPoint & { ttftMs: number } => point.ttftMs !== null)
+        .map((point) => ({ day: point.day, value: point.ttftMs })),
+    }))
+    .filter((series) => series.points.length > 0);
 
   const hasSamples = Boolean(series && series.totalSamples > 0);
   const enabled = Boolean(series?.enabled ?? state.speed.enabled);
@@ -127,7 +139,7 @@ export function Speed({
                 </span>
               ))}
             </div>
-            <LineChart series={chartSeries} language={language} height={210} unit=" tok/s" />
+            <LineChart series={chartSeries} language={language} height={210} unit=" ms" digits={0} />
           </div>
 
           <div className="soft-card" style={{ padding: '12px 14px' }}>
@@ -145,9 +157,12 @@ export function Speed({
                   <span>{providerLabel(model.provider)}</span>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div className="model-tokens mono">{model.avgTps.toFixed(1)} tok/s</div>
+                  <div className="model-tokens mono">
+                    {model.avgTtft > 0 ? formatDuration(model.avgTtft) : '—'}
+                  </div>
                   <div className="faint" style={{ fontSize: 9.5, marginTop: 1 }}>
-                    {t('speed.ttft')} {formatDuration(model.avgTtft)} · {model.samples}
+                    {model.avgTps > 0 ? `${model.avgTps.toFixed(1)} tok/s · ` : ''}
+                    {model.samples}
                   </div>
                 </div>
               </div>

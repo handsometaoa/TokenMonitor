@@ -76,7 +76,7 @@ export class SpeedStore {
     >();
 
     for (const record of this.readSince(cutoff)) {
-      if (record.outputTokens <= 0 || record.durationMs <= 0) continue;
+      if (record.durationMs <= 0 && record.outputTokens <= 0) continue;
       const day = localDayKey(record.ts);
       const key = `${day}\u0000${record.provider}\u0000${record.model}`;
       const group = groups.get(key) ?? {
@@ -106,7 +106,8 @@ export class SpeedStore {
           day: group.day,
           provider: group.provider,
           model: group.model,
-          tokensPerSecond: Math.round((group.outputTokens / (group.durationMs / 1000)) * 10) / 10,
+          tokensPerSecond:
+            group.outputTokens > 0 ? Math.round((group.outputTokens / (group.durationMs / 1000)) * 10) / 10 : 0,
           ttftMs: Math.round(group.ttftMs / group.samples),
           samples: group.samples,
           tokenSource,

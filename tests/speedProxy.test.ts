@@ -74,4 +74,44 @@ describe('SpeedProxyService', () => {
     expect(series[0].tokensPerSecond).toBeGreaterThan(0);
     expect(settings.get().speed.configApplied).toBe(true);
   });
+
+  it('records TTFT even when upstream usage is absent', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tokenmonitor-proxy-'));
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+
+    const upstream = createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'hello' } }] })}\n\n`);
+      setTimeout(() => res.end(), 30);
+    });
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => new Promise<void>((resolve) => upstream.close(() => resolve())));
+
+    const settings = new SettingsStore(dir);
+    settings.setSpeedConfig({
+      enabled: true,
+      upstreamBase: `http://127.0.0.1:${upstreamPort}/zen/go/v1`,
+      configApplied: false,
+    });
+    const logger = new Logger(dir);
+    const store = new SpeedStore(dir, logger);
+    const proxy = new SpeedProxyService(dir, settings, store, logger, false);
+    await proxy.start();
+    cleanups.push(() => proxy.stop());
+
+    const info = proxy.getConfigInfo();
+    const response = await fetch(`${info.proxyUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'ttft-model', stream: true }),
+    });
+    await response.text();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    const series = store.getSeries('7d');
+    expect(series).toHaveLength(1);
+    expect(series[0].model).toBe('ttft-model');
+    expect(series[0].ttftMs).toBeGreaterThan(0);
+    expect(series[0].tokensPerSecond).toBe(0);
+  });
 });
