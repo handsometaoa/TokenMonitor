@@ -113,6 +113,8 @@ function cursorCookieFromToken(token: string): string | null {
 
 function cursorLocalToken(): string | null {
   const candidates = [
+    // macOS: VS Code-family apps store state under Application Support.
+    join(homedir(), 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb'),
     process.env.APPDATA ? join(process.env.APPDATA, 'Cursor', 'User', 'globalStorage', 'state.vscdb') : '',
     process.env.XDG_CONFIG_HOME ? join(process.env.XDG_CONFIG_HOME, 'Cursor', 'User', 'globalStorage', 'state.vscdb') : '',
     join(homedir(), '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb'),

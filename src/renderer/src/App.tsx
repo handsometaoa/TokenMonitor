@@ -24,6 +24,12 @@ export function App() {
   const theme = state?.settings.theme ?? 'system';
   useTheme(theme);
 
+  // macOS uses the native titlebar with inset traffic lights, so renderer
+  // chrome needs extra top padding to stay clear of them.
+  useEffect(() => {
+    document.documentElement.dataset.platform = state?.platform ?? '';
+  }, [state?.platform]);
+
   useEffect(() => {
     let alive = true;
     void window.tokenMonitor

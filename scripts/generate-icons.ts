@@ -19,6 +19,17 @@ function traySvg(color: string): string {
 </svg>`;
 }
 
+function trayTemplateSvg(): string {
+  // macOS menu-bar template images must be monochrome with alpha; the OS tints them.
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <g fill="#000000">
+    <rect x="5" y="15" width="6" height="12" rx="2.4"/>
+    <rect x="13" y="9" width="6" height="18" rx="2.4"/>
+    <rect x="21" y="4" width="6" height="23" rx="2.4"/>
+  </g>
+</svg>`;
+}
+
 function appSvg(): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
@@ -67,8 +78,13 @@ for (const [name, color] of Object.entries(trayColors)) {
   await writeFile(join(resourcesDir, `tray-${name}.ico`), ico);
 }
 
-const appBuffer = Buffer.from(appSvg());
-await sharp(appBuffer).resize(1024, 1024).png().toFile(join(buildDir, 'icon.png'));
+// macOS template images: black shapes + transparency, tinted by the menu bar.
+// Electron picks up the `Template` suffix (and @2x variant) automatically.
+const templateBuffer = Buffer.from(trayTemplateSvg());
+await sharp(templateBuffer).resize(22, 22).png().toFile(join(resourcesDir, 'trayTemplate.png'));
+await sharp(templateBuffer).resize(44, 44).png().toFile(join(resourcesDir, 'trayTemplate@2x.png'));
+
+const appBuffer = Buffer.from(appSvg());await sharp(appBuffer).resize(1024, 1024).png().toFile(join(buildDir, 'icon.png'));
 await sharp(appBuffer).resize(512, 512).png().toFile(join(resourcesDir, 'app.png'));
 const appIcoPngs: Buffer[] = [];
 for (const size of [16, 24, 32, 48, 64, 128, 256]) {

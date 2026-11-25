@@ -1,5 +1,8 @@
 import type { ErrorCode, ExtraProviderId, QuotaStatus, ResetCreditsInfo } from '../../../shared/types';
+import type { FetchRequestInit, FetchResponse } from '../../../shared/fetch';
 import { finiteNumber } from '../../../shared/validation';
+
+export type { FetchRequestInit, FetchResponse } from '../../../shared/fetch';
 
 export interface ExtraProviderCredential {
   providerId: ExtraProviderId;
@@ -40,29 +43,6 @@ export class ExtraProviderError extends Error {
     this.code = code;
     this.status = status;
   }
-}
-
-export interface FetchRequestInit {
-  method?: string;
-  headers?: Record<string, string>;
-  body?: string;
-  signal?: AbortSignal;
-  cache?: 'default' | 'no-store' | 'reload' | 'no-cache' | 'force-cache' | 'only-if-cached';
-}
-
-export interface FetchResponseHeaders {
-  get(name: string): string | null;
-  entries(): IterableIterator<[string, string]>;
-}
-
-export interface FetchResponse {
-  readonly ok: boolean;
-  readonly status: number;
-  readonly statusText?: string;
-  readonly headers: FetchResponseHeaders;
-  readonly body?: unknown;
-  text(): Promise<string>;
-  json(): Promise<unknown>;
 }
 
 export type ExtraFetch = (input: string, init?: FetchRequestInit) => Promise<FetchResponse>;

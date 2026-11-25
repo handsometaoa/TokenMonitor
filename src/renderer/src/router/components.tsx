@@ -46,11 +46,11 @@ export function Field({
   children: ReactNode;
 }) {
   return (
-    <label className="router-field">
+    <div className="router-field">
       <span className="router-field-label">{label}</span>
-      {children}
+      <div className="router-field-control">{children}</div>
       {hint ? <span className="router-field-hint">{hint}</span> : null}
-    </label>
+    </div>
   );
 }
 

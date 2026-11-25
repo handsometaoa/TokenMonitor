@@ -276,6 +276,15 @@ export class TrayManager {
 
   private iconFor(state: IconState): Electron.NativeImage {
     const base = join(app.getAppPath(), 'resources', 'icons');
+    if (process.platform === 'darwin') {
+      // macOS menu bar uses a template image so the system tints it for light
+      // and dark menu bars; the state is conveyed by the tooltip and menu text.
+      const template = nativeImage.createFromPath(join(base, 'trayTemplate.png'));
+      if (!template.isEmpty()) {
+        template.setTemplateImage(true);
+        return template;
+      }
+    }
     const candidates = [
       join(base, `tray-${state}.ico`),
       join(base, `tray-${state}.png`),

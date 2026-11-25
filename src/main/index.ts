@@ -58,6 +58,7 @@ if (!gotLock) {
     tray = new TrayManager(currentController, currentWindows, quit);
 
     currentWindows.createMainWindow();
+    currentWindows.installApplicationMenu();
     tray.create();
     registerIpc(currentController, currentWindows, quit);
 

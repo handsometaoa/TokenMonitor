@@ -61,22 +61,22 @@ export function RouterSettings({
           </div>
         </div>
         <div className="router-form-grid">
-          <Field label="总开关">
-            <label className="router-check">
+          <Field label="总开关" hint="关闭后退化为单渠道直连">
+            <label className="router-check router-check-boxed">
               <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
-              启用多渠道路由
+              {enabled ? '已启用多渠道路由' : '已关闭'}
             </label>
           </Field>
           <Field label="会话亲和" hint="同一会话固定同一渠道，提升上游 prompt cache 命中">
-            <label className="router-check">
+            <label className="router-check router-check-boxed">
               <input type="checkbox" checked={sessionAffinity} onChange={(event) => setSessionAffinity(event.target.checked)} />
-              开启会话亲和
+              {sessionAffinity ? '已开启' : '已关闭'}
             </label>
           </Field>
           <Field label="额度前置拦截" hint="余量耗尽或余额 ≤ 0 的渠道直接跳过">
-            <label className="router-check">
+            <label className="router-check router-check-boxed">
               <input type="checkbox" checked={quotaGuard} onChange={(event) => setQuotaGuard(event.target.checked)} />
-              开启额度拦截
+              {quotaGuard ? '已开启' : '已关闭'}
             </label>
           </Field>
           <Field label="最大尝试渠道数" hint="1-5；包含首次尝试">

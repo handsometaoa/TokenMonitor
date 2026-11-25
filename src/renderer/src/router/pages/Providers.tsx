@@ -89,6 +89,7 @@ export function Providers({
   const [busy, setBusy] = useState(false);
   const [fetchingModelProvider, setFetchingModelProvider] = useState<string | null>(null);
   const [fetchedModels, setFetchedModels] = useState<{ providerName: string; models: string[] } | null>(null);
+  const [showKey, setShowKey] = useState(false);
 
   // The parent only loads active providers. While "show archived" is on, keep the
   // locally fetched full list instead of letting the parent refresh wipe archived rows.
@@ -100,6 +101,10 @@ export function Providers({
     setProviders(await window.tokenMonitor.listRouterProviders(archived));
     onChanged();
   };
+
+  const selectedStrategy = editing
+    ? (strategies.find((strategy) => strategy.id === editing.quotaStrategyId) ?? null)
+    : null;
 
   const save = async () => {
     if (!editing) return;
@@ -176,7 +181,14 @@ export function Providers({
             />
             显示已归档
           </label>
-          <button type="button" className="router-btn primary" onClick={() => setEditing({ ...EMPTY_FORM })}>
+          <button
+            type="button"
+            className="router-btn primary"
+            onClick={() => {
+              setShowKey(false);
+              setEditing({ ...EMPTY_FORM });
+            }}
+          >
             <Plus size={15} />
             添加提供商
           </button>
@@ -235,7 +247,8 @@ export function Providers({
                       type="button"
                       className="router-icon-btn"
                       title="编辑"
-                      onClick={() =>
+                      onClick={() => {
+                        setShowKey(false);
                         setEditing({
                           id: provider.id,
                           name: provider.name,
@@ -246,8 +259,8 @@ export function Providers({
                           enabled: provider.enabled,
                           quotaStrategyId: provider.quotaStrategyId ?? '',
                           strategyConfig: JSON.stringify(provider.strategyConfig ?? {}, null, 2),
-                        })
-                      }
+                        });
+                      }}
                     >
                       <Pencil size={14} />
                     </button>
@@ -314,59 +327,78 @@ export function Providers({
               </button>
             ))}
           </div>
-          <div className="router-form-grid">
-            <Field label="名称">
-              <input className="router-input" value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} />
-            </Field>
-            <Field label="类型">
-              <select
-                className="router-select"
-                value={editing.kind}
-                onChange={(event) => {
-                  const kind = event.target.value;
-                  if (isRouterProviderKind(kind)) setEditing({ ...editing, kind });
-                }}
-              >
-                {KINDS.map((item) => (
-                  <option key={item.value} value={item.value}>{item.label}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="协议">
-              <select
-                className="router-select"
-                value={editing.protocol}
-                onChange={(event) => {
-                  const protocol = event.target.value;
-                  if (isRouterProtocol(protocol)) setEditing({ ...editing, protocol });
-                }}
-              >
-                {PROTOCOLS.map((item) => (
-                  <option key={item.value} value={item.value}>{item.label}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="启用">
-              <label className="router-check">
-                <input type="checkbox" checked={editing.enabled} onChange={(event) => setEditing({ ...editing, enabled: event.target.checked })} />
-                参与路由
-              </label>
+          <div className="router-form-section">
+            <div className="router-form-section-title">基础信息</div>
+            <div className="router-form-grid">
+              <Field label="名称">
+                <input className="router-input" value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} />
+              </Field>
+              <Field label="类型">
+                <select
+                  className="router-select"
+                  value={editing.kind}
+                  onChange={(event) => {
+                    const kind = event.target.value;
+                    if (isRouterProviderKind(kind)) setEditing({ ...editing, kind });
+                  }}
+                >
+                  {KINDS.map((item) => (
+                    <option key={item.value} value={item.value}>{item.label}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="协议">
+                <select
+                  className="router-select"
+                  value={editing.protocol}
+                  onChange={(event) => {
+                    const protocol = event.target.value;
+                    if (isRouterProtocol(protocol)) setEditing({ ...editing, protocol });
+                  }}
+                >
+                  {PROTOCOLS.map((item) => (
+                    <option key={item.value} value={item.value}>{item.label}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="参与路由" hint="关闭后该提供商不会被选路，但配置与凭证保留">
+                <label className="router-check router-check-boxed">
+                  <input type="checkbox" checked={editing.enabled} onChange={(event) => setEditing({ ...editing, enabled: event.target.checked })} />
+                  {editing.enabled ? '已启用' : '已停用'}
+                </label>
+              </Field>
+            </div>
+            <Field label="Base URL" hint="填写完整 API 根地址，不会自动补 /v1">
+              <input className="router-input mono" value={editing.baseUrl} onChange={(event) => setEditing({ ...editing, baseUrl: event.target.value })} />
             </Field>
           </div>
-          <Field label="Base URL" hint="统一约定：填写完整 API 根，不自动补 /v1">
-            <input className="router-input mono" value={editing.baseUrl} onChange={(event) => setEditing({ ...editing, baseUrl: event.target.value })} />
-          </Field>
-          <Field label={editing.id ? 'API Key（留空保持不变）' : 'API Key'} hint="仅保存在本机，使用系统加密；不会传给渲染进程之外的其他服务">
-            <input
-              className="router-input mono"
-              type="password"
-              value={editing.apiKey}
-              placeholder={editing.id ? '••••••••（留空不修改）' : 'sk-…'}
-              onChange={(event) => setEditing({ ...editing, apiKey: event.target.value })}
-            />
-          </Field>
-          <div className="router-form-grid">
-            <Field label="余量策略">
+
+          <div className="router-form-section">
+            <div className="router-form-section-title">凭证</div>
+            <Field
+              label={editing.id ? 'API Key（留空保持不变）' : 'API Key'}
+              hint="仅保存在本机，使用系统加密；不会传给渲染进程之外的其他服务"
+            >
+              <div className="router-input-row">
+                <input
+                  className="router-input mono"
+                  type={showKey ? 'text' : 'password'}
+                  value={editing.apiKey}
+                  placeholder={editing.id ? '••••••••（留空不修改）' : 'sk-…'}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => setEditing({ ...editing, apiKey: event.target.value })}
+                />
+                <button type="button" className="router-btn" onClick={() => setShowKey((value) => !value)}>
+                  {showKey ? '隐藏' : '显示'}
+                </button>
+              </div>
+            </Field>
+          </div>
+
+          <div className="router-form-section">
+            <div className="router-form-section-title">余量查询</div>
+            <Field label="余量策略" hint={selectedStrategy?.description ?? '留空则完全不查询该提供商的额度'}>
               <select
                 className="router-select"
                 value={editing.quotaStrategyId}
@@ -378,17 +410,18 @@ export function Providers({
                 ))}
               </select>
             </Field>
-            <Field
-              label="策略附加配置"
-              hint="JSON；Custom HTTP 支持 url / auth / headers / percentPath / usedPath / limitPath / balancePath / currency / windowMinutes"
-            >
-              <textarea
-                className="router-input mono"
-                style={{ height: 64, padding: '7px 10px', resize: 'vertical' }}
-                value={editing.strategyConfig}
-                onChange={(event) => setEditing({ ...editing, strategyConfig: event.target.value })}
-              />
-            </Field>
+            {editing.quotaStrategyId ? (
+              <Field
+                label="策略附加配置"
+                hint="JSON 对象；常见键：url / auth / headers / percentPath / usedPath / limitPath / balancePath / currency / windowMinutes"
+              >
+                <textarea
+                  className="router-input mono router-textarea"
+                  value={editing.strategyConfig}
+                  onChange={(event) => setEditing({ ...editing, strategyConfig: event.target.value })}
+                />
+              </Field>
+            ) : null}
           </div>
         </RouterModal>
       ) : null}

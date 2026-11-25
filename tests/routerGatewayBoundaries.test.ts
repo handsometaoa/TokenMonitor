@@ -32,7 +32,11 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-async function startGateway(baseUrl: string, proxyUrl = ''): Promise<{ port: number; repo: RouterRepository }> {
+async function startGateway(
+  baseUrl: string,
+  proxyUrl = '',
+  providerKind: 'custom' | 'opencode' = 'custom',
+): Promise<{ port: number; repo: RouterRepository }> {
   const dir = mkdtempSync(join(tmpdir(), 'tokenmonitor-router-boundary-'));
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
   const repo = new RouterRepository(dir);
@@ -42,7 +46,7 @@ async function startGateway(baseUrl: string, proxyUrl = ''): Promise<{ port: num
   const provider = repo.saveProvider({
     name: 'boundary-upstream',
     protocol: 'anthropic',
-    kind: 'custom',
+    kind: providerKind,
     baseUrl,
     enabled: true,
   });
@@ -133,5 +137,75 @@ describe('gateway external boundaries', () => {
     expect(response.status).toBe(200);
     expect(text).toContain('proxied');
     expect(text).toContain('[DONE]');
+  });
+
+  it('supplies x-opencode-session when the client omits it', async () => {
+    let seenSession: string | undefined;
+    const upstream = createServer((req, res) => {
+      seenSession = typeof req.headers['x-opencode-session'] === 'string' ? req.headers['x-opencode-session'] : undefined;
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            id: 'msg_1',
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'ok' }],
+            stop_reason: 'end_turn',
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+        );
+      });
+    });
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => new Promise<void>((resolve) => upstream.close(() => resolve())));
+
+    const { port } = await startGateway(`http://127.0.0.1:${upstreamPort}/v1`, '', 'opencode');
+
+    const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer router-key', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'test-model', messages: [{ role: 'user', content: 'hi' }] }),
+    });
+    expect(response.status).toBe(200);
+    expect(seenSession).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  });
+
+  it('preserves a client-supplied OpenCode session id', async () => {
+    let seenSession: string | undefined;
+    const upstream = createServer((req, res) => {
+      seenSession = typeof req.headers['x-opencode-session'] === 'string' ? req.headers['x-opencode-session'] : undefined;
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            id: 'msg_1',
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'ok' }],
+            stop_reason: 'end_turn',
+            usage: { input_tokens: 1, output_tokens: 1 },
+          }),
+        );
+      });
+    });
+    const upstreamPort = await listen(upstream);
+    cleanups.push(() => new Promise<void>((resolve) => upstream.close(() => resolve())));
+
+    const { port } = await startGateway(`http://127.0.0.1:${upstreamPort}/v1`, '', 'opencode');
+
+    const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer router-key',
+        'content-type': 'application/json',
+        'x-opencode-session': 'client-session-abc',
+      },
+      body: JSON.stringify({ model: 'test-model', messages: [{ role: 'user', content: 'hi' }] }),
+    });
+    expect(response.status).toBe(200);
+    expect(seenSession).toBe('client-session-abc');
   });
 });

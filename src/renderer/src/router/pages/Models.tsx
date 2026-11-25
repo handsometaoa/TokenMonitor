@@ -423,48 +423,56 @@ export function Models({
             </>
           }
         >
-          <Field label="提供商">
-            <select className="router-select" value={editing.providerId} onChange={(event) => setEditing({ ...editing, providerId: event.target.value })}>
-              {providers.filter((provider) => !provider.archivedAt).map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name} · {provider.protocol}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <div className="router-form-grid">
-            <Field label="对外模型名" hint="客户端请求里使用的 model">
-              <input className="router-input mono" value={editing.publicName} onChange={(event) => setEditing({ ...editing, publicName: event.target.value })} placeholder="gpt-4o-mini" />
+          <div className="router-form-section">
+            <div className="router-form-section-title">渠道映射</div>
+            <Field label="提供商" hint="只有未归档的提供商可创建渠道">
+              <select className="router-select" value={editing.providerId} onChange={(event) => setEditing({ ...editing, providerId: event.target.value })}>
+                {providers.filter((provider) => !provider.archivedAt).map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.name} · {provider.protocol}
+                  </option>
+                ))}
+              </select>
             </Field>
-            <Field label="上游模型名" hint="发给提供商的真实 model；可从上游拉取选择">
-              <input
-                className="router-input mono"
-                value={editing.upstreamName}
-                onChange={(event) => setEditing({ ...editing, upstreamName: event.target.value })}
-                placeholder="gpt-4o-mini"
-                list="upstream-model-options"
-              />
+            <div className="router-form-grid">
+              <Field label="对外模型名" hint="客户端请求里使用的 model">
+                <input className="router-input mono" value={editing.publicName} onChange={(event) => setEditing({ ...editing, publicName: event.target.value })} placeholder="gpt-4o-mini" />
+              </Field>
+              <Field label="上游模型名" hint="发给提供商的真实 model；可从上游拉取选择">
+                <input
+                  className="router-input mono"
+                  value={editing.upstreamName}
+                  onChange={(event) => setEditing({ ...editing, upstreamName: event.target.value })}
+                  placeholder="gpt-4o-mini"
+                  list="upstream-model-options"
+                />
+              </Field>
+            </div>
+            <datalist id="upstream-model-options">
+              {formModels.map((model) => (
+                <option key={model} value={model} />
+              ))}
+            </datalist>
+            <button
+              type="button"
+              className="router-btn"
+              onClick={() => void pullFormModels()}
+              disabled={formModelsBusy || !editing.providerId}
+              title="从提供商 /models 接口拉取可用模型，填充到上方输入的自动补全"
+            >
+              <ListTree size={13} />
+              {formModelsBusy ? '拉取中…' : '拉取模型列表'}
+            </button>
+          </div>
+          <div className="router-form-section">
+            <div className="router-form-section-title">状态</div>
+            <Field label="参与路由" hint="关闭后该渠道不会被选路，配置保留">
+              <label className="router-check router-check-boxed">
+                <input type="checkbox" checked={editing.enabled} onChange={(event) => setEditing({ ...editing, enabled: event.target.checked })} />
+                {editing.enabled ? '已启用' : '已停用'}
+              </label>
             </Field>
           </div>
-          <datalist id="upstream-model-options">
-            {formModels.map((model) => (
-              <option key={model} value={model} />
-            ))}
-          </datalist>
-          <button
-            type="button"
-            className="router-btn"
-            onClick={() => void pullFormModels()}
-            disabled={formModelsBusy || !editing.providerId}
-            title="从提供商 /models 接口拉取可用模型，填充到上方输入的自动补全"
-          >
-            <ListTree size={13} />
-            {formModelsBusy ? '拉取中…' : '拉取模型列表'}
-          </button>
-          <label className="router-check">
-            <input type="checkbox" checked={editing.enabled} onChange={(event) => setEditing({ ...editing, enabled: event.target.checked })} />
-            参与路由
-          </label>
         </RouterModal>
       ) : null}
     </div>

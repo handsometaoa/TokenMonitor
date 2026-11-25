@@ -5,8 +5,9 @@ import type { RouterProtocol, RouterServiceConfig } from '../../shared/routerTyp
 import { asRecord, isRecord, parseJson, stringValue } from '../../shared/validation';
 import type { Logger } from '../services/logger';
 import type { ProviderSecretStore } from '../services/providerSecrets';
-import type { FetchRequestInit, FetchResponse } from '../providers/extra/types';
-import { RouterBalancer, type RouterFailureKind, sessionKeyFrom } from './balancer';
+import type { FetchRequestInit, FetchResponse } from '../../shared/fetch';
+import { RouterBalancer, type RouterFailureKind } from './balancer';
+import { sessionIdFromKey, sessionKeyFrom } from './session';
 import type { RouterRepository, RouterRoute } from './db';
 import { adapterFor } from './protocol/registry';
 import type { ApiUsage, Conversation, ProtocolAdapter, StreamEvent } from './protocol/types';
@@ -67,6 +68,15 @@ function protocolForPath(path: string): RouterProtocol | null {
   if (path === '/v1/messages') return 'anthropic';
   if (path === '/v1/responses') return 'openai-responses';
   return null;
+}
+
+/**
+ * OpenCode Go advertises an OpenAI-compatible surface but additionally expects
+ * `x-opencode-session` for session affinity and prompt-cache routing. Standard
+ * OpenAI clients never send it, so the gateway supplies one when proxying here.
+ */
+function isOpenCodeTarget(route: RouterRoute): boolean {
+  return route.providerKind === 'opencode' || /opencode\.ai/i.test(route.providerBaseUrl);
 }
 
 function joinUrl(baseUrl: string, path: string): string {
@@ -470,6 +480,12 @@ export class RouterGateway {
       }
 
       const headers = this.upstreamHeaders(req, upstreamAdapter.authHeaders(apiKey), stream);
+      // OpenCode Go requires a session id. Clients may omit it (plain OpenAI SDKs
+      // never send it), so fill one in rather than failing the request upstream.
+      if (!headers['x-opencode-session'] && isOpenCodeTarget(route)) {
+        const sessionKey = sessionKeyFrom(req.headers, body);
+        headers['x-opencode-session'] = sessionKey ? sessionIdFromKey(sessionKey) : randomUUID();
+      }
       const requestBodyText = JSON.stringify(wireBody);
       const url = `${joinUrl(this.providerBaseUrl(route.providerId), upstreamAdapter.upstreamPath)}${sameProtocol ? requestUrl.search : ''}`;
 
@@ -514,7 +530,7 @@ export class RouterGateway {
           responseBody: capture(errorText),
           responseHeaders: responseHeaders(upstream.headers),
           retryTrace: attempts,
-        }, requestBodyText, body, stream, sameProtocol, entryAdapter, upstream, null);
+        }, requestBodyText, body, stream, sameProtocol, entryAdapter, upstream, null, headers);
         return;
       }
 
@@ -537,6 +553,7 @@ export class RouterGateway {
           sessionKey,
           firstByteAt - startedAt,
           breakdown,
+          headers,
         );
         if (result.committed) return;
         lastError = result.error;
@@ -575,6 +592,7 @@ export class RouterGateway {
           entryAdapter,
           upstream,
           null,
+          headers,
         );
         return;
       }
@@ -631,6 +649,7 @@ export class RouterGateway {
             entryAdapter,
             upstream,
             null,
+            headers,
           );
           return;
         }
@@ -696,6 +715,7 @@ export class RouterGateway {
     sessionKey: string | null,
     ttftMs: number | null,
     breakdown: RequestBreakdown | null,
+    headers: Record<string, string>,
   ): Promise<{ committed: boolean; error: string }> {
     const reader = upstream.body?.getReader();
     if (!reader) return { committed: false, error: 'Upstream returned no stream body' };
@@ -734,7 +754,7 @@ export class RouterGateway {
       path,
       stream: true,
       requestBody: this.bodyForLog(requestBodyText),
-      requestHeaders: this.logHeaders({}),
+      requestHeaders: this.logHeaders(headers),
       startedAt,
     });
 
@@ -882,6 +902,7 @@ export class RouterGateway {
     entryAdapter: ProtocolAdapter,
     upstream: Response,
     _parsed: unknown,
+    headers: Record<string, string>,
   ): void {
     this.repo.startLog({
       requestId,
@@ -894,7 +915,7 @@ export class RouterGateway {
       path,
       stream,
       requestBody: this.bodyForLog(requestBodyText),
-      requestHeaders: this.logHeaders({}),
+      requestHeaders: this.logHeaders(headers),
       startedAt,
     });
     if (!sameProtocol) {

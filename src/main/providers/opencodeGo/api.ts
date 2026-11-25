@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { QUOTA_API_URL } from '../../../shared/types';
 import type { ErrorCode, ProviderError, QuotaStatus, QuotaWindowId } from '../../../shared/types';
+import type { FetchRequestInit } from '../../../shared/fetch';
 import { finiteNumber, stringValue } from '../../../shared/validation';
-import { isoReset, type FetchRequestInit } from '../extra/types';
+import { isoReset } from '../extra/types';
 
 export type FetchLike = (input: string, init?: FetchRequestInit) => Promise<Response>;
 

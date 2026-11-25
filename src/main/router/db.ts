@@ -62,6 +62,8 @@ export interface RouterRoute {
   providerId: string;
   providerName: string;
   providerProtocol: RouterProtocol;
+  providerKind: RouterProviderKind;
+  providerBaseUrl: string;
   publicName: string;
   upstreamModel: string;
   providerEnabled: boolean;
@@ -143,6 +145,8 @@ const routeRowSchema = z.object({
   upstream_name: textColumn,
   provider_name: textColumn,
   provider_protocol: routerProtocolSchema,
+  provider_kind: routerProviderKindSchema,
+  provider_base_url: textColumn,
   model_enabled: flagColumn,
   provider_enabled: flagColumn,
   model_archived: nullableIntegerColumn,
@@ -764,6 +768,7 @@ export class RouterRepository {
         .prepare(`
           SELECT m.id AS model_id, m.provider_id, m.public_name, m.upstream_name,
             p.name AS provider_name, p.protocol AS provider_protocol,
+            p.kind AS provider_kind, p.base_url AS provider_base_url,
             m.enabled AS model_enabled, p.enabled AS provider_enabled,
             m.archived_at AS model_archived, p.archived_at AS provider_archived
           FROM models m JOIN providers p ON p.id = m.provider_id
@@ -779,6 +784,8 @@ export class RouterRepository {
         providerId: row.provider_id,
         providerName: row.provider_name,
         providerProtocol: row.provider_protocol,
+        providerKind: row.provider_kind,
+        providerBaseUrl: row.provider_base_url,
         publicName: row.public_name,
         upstreamModel: row.upstream_name,
         providerEnabled: row.provider_enabled,

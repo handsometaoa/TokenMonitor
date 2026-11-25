@@ -17,6 +17,22 @@
   border-right: 1px solid var(--border);
 }
 
+/*
+ * macOS keeps the native traffic lights over our chrome. Push the sidebar and
+ * header down so the window controls never overlap the brand or page title.
+ */
+html[data-platform='darwin'] .router-sidebar {
+  padding-top: 46px;
+}
+
+html[data-platform='darwin'] .router-header {
+  padding-top: 30px;
+}
+
+html[data-platform='darwin'] .settings-sidebar {
+  padding-top: 44px;
+}
+
 .router-brand {
   display: flex;
   align-items: center;
@@ -312,6 +328,47 @@
   gap: 14px;
 }
 
+/*
+ * Two side-by-side usage tables need more room than a half-width column gives them.
+ * Below a comfortable width they stack so the 8 columns are never squeezed together.
+ */
+.router-two-col.usage {
+  grid-template-columns: repeat(auto-fit, minmax(min(650px, 100%), 1fr));
+  align-items: start;
+}
+
+.router-table-scroll {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--track-strong) transparent;
+}
+
+.router-table-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.router-table-scroll::-webkit-scrollbar-thumb {
+  background: var(--track-strong);
+  border-radius: 999px;
+}
+
+.router-table.usage {
+  min-width: 648px;
+}
+
+.router-table.usage th,
+.router-table.usage td {
+  white-space: nowrap;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.router-table.usage td.router-table-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .router-badge {
   display: inline-flex;
   align-items: center;
@@ -501,27 +558,31 @@
 .router-field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
+  min-width: 0;
+}
+
+.router-field-control {
   min-width: 0;
 }
 
 .router-field-label {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 650;
   color: var(--muted);
+  letter-spacing: 0.01em;
 }
 
 .router-field-hint {
   font-size: 9.5px;
+  line-height: 1.5;
   color: var(--faint);
-  line-height: 1.4;
 }
 
 .router-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 14px 12px;
 }
 
 .router-config-list {
@@ -588,6 +649,53 @@
 
 .router-input-row .router-btn {
   height: 32px;
+  flex: 0 0 auto;
+}
+
+.router-form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.router-form-section + .router-form-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.router-form-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.router-textarea {
+  height: 96px;
+  padding: 8px 10px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.router-check-boxed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-solid);
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+.router-check-boxed:has(input:checked) {
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .router-test-result {

@@ -169,41 +169,43 @@ function UsageTable({ title, rows }: { title: string; rows: RouterUsageGroup[] }
       <div className="router-card-head compact">
         <div className="router-card-title">{title}</div>
       </div>
-      <table className="router-table">
-        <thead>
-          <tr>
-            <th>名称</th>
-            <th>请求</th>
-            <th>成功率</th>
-            <th>Tokens</th>
-            <th>缓存</th>
-            <th>平均耗时</th>
-            <th>TTFT</th>
-            <th>输出速度</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.key}>
-              <td className="mono">{row.key || '—'}</td>
-              <td>{row.requestCount}</td>
-              <td>{row.requestCount > 0 ? `${((row.successCount / row.requestCount) * 100).toFixed(1)}%` : '—'}</td>
-              <td className="mono">{formatRouterTokens(row.totalTokens)}</td>
-              <td className="mono">{formatRouterTokens(row.cacheReadTokens)}</td>
-              <td className="mono">{row.requestCount > 0 ? formatRouterDuration(row.durationMs / row.requestCount) : '—'}</td>
-              <td className="mono">{row.ttftSamples > 0 ? formatRouterDuration(row.ttftMs / row.ttftSamples) : '—'}</td>
-              <td className="mono">{row.generationMs > 0 ? `${((row.completionTokens / row.generationMs) * 1000).toFixed(1)} tok/s` : '—'}</td>
-            </tr>
-          ))}
-          {rows.length === 0 ? (
+      <div className="router-table-scroll">
+        <table className="router-table usage">
+          <thead>
             <tr>
-              <td colSpan={8}>
-                <div className="router-empty-inline">该区间没有数据。</div>
-              </td>
+              <th>名称</th>
+              <th>请求</th>
+              <th>成功率</th>
+              <th>Tokens</th>
+              <th>缓存</th>
+              <th>平均耗时</th>
+              <th>TTFT</th>
+              <th>输出速度</th>
             </tr>
-          ) : null}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.key}>
+                <td className="mono router-table-name" title={row.key || '—'}>{row.key || '—'}</td>
+                <td className="mono">{row.requestCount}</td>
+                <td className="mono">{row.requestCount > 0 ? `${((row.successCount / row.requestCount) * 100).toFixed(1)}%` : '—'}</td>
+                <td className="mono">{formatRouterTokens(row.totalTokens)}</td>
+                <td className="mono">{formatRouterTokens(row.cacheReadTokens)}</td>
+                <td className="mono">{row.requestCount > 0 ? formatRouterDuration(row.durationMs / row.requestCount) : '—'}</td>
+                <td className="mono">{row.ttftSamples > 0 ? formatRouterDuration(row.ttftMs / row.ttftSamples) : '—'}</td>
+                <td className="mono">{row.generationMs > 0 ? `${((row.completionTokens / row.generationMs) * 1000).toFixed(1)} tok/s` : '—'}</td>
+              </tr>
+            ))}
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={8}>
+                  <div className="router-empty-inline">该区间没有数据。</div>
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -683,7 +685,7 @@ export function Usage({ onError }: { onError: (message: string) => void }) {
         {usage ? <UsageBars usage={usage} /> : <div className="router-empty-inline">读取中…</div>}
       </div>
 
-      <div className="router-two-col">
+      <div className="router-two-col usage">
         <UsageTable title="按提供商" rows={usage?.providers ?? []} />
         <UsageTable title="按模型" rows={usage?.models ?? []} />
       </div>

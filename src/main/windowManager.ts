@@ -1,7 +1,9 @@
-import { app, BrowserWindow, nativeTheme, Notification, screen, shell } from 'electron';
+import { app, BrowserWindow, Menu, nativeTheme, Notification, screen, shell } from 'electron';
 import { join } from 'node:path';
 import type { AppState } from '../shared/types';
 import { APP_NAVIGATE } from '../shared/api';
+
+const isMac = process.platform === 'darwin';
 
 export class WindowManager {
   private mainWindow: BrowserWindow | null = null;
@@ -21,7 +23,9 @@ export class WindowManager {
       minWidth: 980,
       minHeight: 640,
       show: false,
-      frame: false,
+      // macOS keeps the native traffic lights (inset over our header); other
+      // platforms render the custom titlebar instead.
+      ...(isMac ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 18 } } : { frame: false }),
       resizable: true,
       skipTaskbar: false,
       hasShadow: true,
@@ -41,6 +45,7 @@ export class WindowManager {
     const webContentsId = window.webContents.id;
     this.trustedIds.add(webContentsId);
     window.setMenuBarVisibility(false);
+    if (isMac) window.setWindowButtonVisibility(true);
 
     window.on('ready-to-show', () => {
       if (this.pendingShow) {
@@ -115,6 +120,63 @@ export class WindowManager {
 
   hideMain(): void {
     this.mainWindow?.hide();
+  }
+
+  /**
+   * macOS needs a native application menu; without one Cmd+Q, Cmd+H and the
+   * About/Edit shortcuts do nothing because the default menu is removed by
+   * `setMenuBarVisibility(false)`.
+   */
+  installApplicationMenu(): void {
+    if (!isMac) return;
+    const template: Electron.MenuItemConstructorOptions[] = [
+      {
+        label: app.name,
+        submenu: [
+          { role: 'about' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          {
+            label: '设置…',
+            accelerator: 'Command+,',
+            click: () => this.showSettings(),
+          },
+          { type: 'separator' },
+          { role: 'quit' },
+        ],
+      },
+      {
+        label: '编辑',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' },
+        ],
+      },
+      {
+        label: '窗口',
+        submenu: [
+          {
+            label: '打开主窗口',
+            accelerator: 'Command+0',
+            click: () => this.showMain(),
+          },
+          { type: 'separator' },
+          { role: 'minimize' },
+          { role: 'zoom' },
+          { type: 'separator' },
+          { role: 'close' },
+        ],
+      },
+    ];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   }
 
   showSettings(): void {

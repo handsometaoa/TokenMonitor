@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { asRecord } from '../../shared/validation';
 import type {
   RouterBalanceConfig,
@@ -6,8 +5,11 @@ import type {
   RouterQuotaSnapshot,
 } from '../../shared/routerTypes';
 import type { RouterRepository, RouterRoute } from './db';
+import { sessionKeyFrom } from './session';
 
 export type RouterFailureKind = 'network' | 'server' | 'auth' | 'quota';
+
+export { sessionKeyFrom };
 
 interface RuntimeState {
   availability: number;
@@ -30,52 +32,6 @@ const DEFAULT_RUNTIME: RuntimeState = {
   lastSuccessAt: null,
   lastProbeAt: null,
 };
-
-export function sessionKeyFrom(headers: Record<string, string | string[] | undefined>, body: unknown): string | null {
-  for (const name of ['x-session-id', 'x-conversation-id', 'x-thread-id', 'x-opencode-session']) {
-    const value = headers[name];
-    const text = Array.isArray(value) ? value[0] : value;
-    if (typeof text === 'string' && text.trim()) return `${name}:${text.trim()}`;
-  }
-  const record = asRecord(body);
-  if (record) {
-    const metadata = asRecord(record.metadata) ?? {};
-    for (const value of [record.conversation_id, record.session_id, metadata.user_id, metadata.session_id]) {
-      if (typeof value === 'string' && value.trim()) return `meta:${value.trim()}`;
-    }
-  }
-  const fingerprint = fingerprintBody(body);
-  return fingerprint ? `body:${fingerprint}` : null;
-}
-
-function fingerprintBody(body: unknown): string | null {
-  const record = asRecord(body);
-  if (!record) return null;
-  let text = '';
-  if (typeof record.input === 'string') text = record.input;
-  if (!text && Array.isArray(record.messages)) {
-    for (const message of record.messages) {
-      const item = asRecord(message);
-      if (!item || item.role !== 'user') continue;
-      if (typeof item.content === 'string') {
-        text = item.content;
-        break;
-      }
-      if (Array.isArray(item.content)) {
-        for (const part of item.content) {
-          const block = asRecord(part);
-          if (typeof block?.text === 'string' && block.text) {
-            text = block.text;
-            break;
-          }
-        }
-      }
-      if (text) break;
-    }
-  }
-  if (!text) return null;
-  return createHash('sha1').update(text.slice(0, 2000)).digest('hex').slice(0, 16);
-}
 
 export class RouterBalancer {
   private readonly runtimes = new Map<string, RuntimeState>();
