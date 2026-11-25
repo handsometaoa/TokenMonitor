@@ -18,7 +18,9 @@
     "build": "electron-vite build",
     "dist:win": "npm run build && electron-builder --win nsis --x64",
     "dist:dir": "npm run build && electron-builder --win dir --x64",
-    "icons": "node scripts/generate-icons.mjs"
+    "icons": "node scripts/generate-icons.mjs",
+    "checksums": "node scripts/checksums.mjs",
+    "postdist:win": "node scripts/checksums.mjs release"
   },
   "dependencies": {
     "lucide-react": "^1.78.0",

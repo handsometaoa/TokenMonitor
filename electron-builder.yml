@@ -37,7 +37,8 @@ mac:
   target:
     - target: dmg
       arch:
-        - universal
+        - x64
+        - arm64
   icon: build/icon.png
   category: public.app-category.developer-tools
   artifactName: TokenMonitor-${version}-${arch}.${ext}
