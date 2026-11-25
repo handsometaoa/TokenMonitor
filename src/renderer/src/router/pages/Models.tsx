@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Archive, Pencil, Plus, Power, RotateCcw, TextCursorInput, Trash2 } from 'lucide-react';
-import type { RouterModelGroup, RouterModelInput, RouterProvider } from '../../../../shared/routerTypes';
+import {
+  Activity,
+  Archive,
+  ListTree,
+  Pencil,
+  Plus,
+  Power,
+  RotateCcw,
+  TextCursorInput,
+  Trash2,
+} from 'lucide-react';
+import type {
+  RouterModelGroup,
+  RouterModelInput,
+  RouterModelTestResult,
+  RouterProvider,
+} from '../../../../shared/routerTypes';
 import { RouterBadge, RouterModal, Field } from '../components';
 
 interface FormState {
@@ -10,6 +25,13 @@ interface FormState {
   upstreamName: string;
   enabled: boolean;
 }
+
+type TestState = {
+  running: boolean;
+  results: Map<string, RouterModelTestResult>;
+};
+
+const testKey = (publicModel: string, providerName: string) => `${publicModel}\u0000${providerName}`;
 
 export function Models({
   initial,
@@ -27,6 +49,9 @@ export function Models({
   const [renaming, setRenaming] = useState<{ from: string; to: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [test, setTest] = useState<TestState>({ running: false, results: new Map() });
+  const [formModels, setFormModels] = useState<string[]>([]);
+  const [formModelsBusy, setFormModelsBusy] = useState(false);
 
   useEffect(() => {
     setGroups(initial);
@@ -100,6 +125,37 @@ export function Models({
     await reload();
   };
 
+  const runTest = async (publicName: string | null) => {
+    setError(null);
+    setTest({ running: true, results: new Map() });
+    try {
+      const results = await window.tokenMonitor.testRouterModels(publicName);
+      setTest((current) => ({
+        running: false,
+        results: new Map([
+          ...(publicName ? [] : []),
+          ...results.map((result) => [testKey(result.publicModel, result.providerName), result] as const),
+        ]),
+      }));
+    } catch (reason) {
+      setTest({ running: false, results: new Map() });
+      setError(reason instanceof Error ? reason.message : '模型检测失败');
+    }
+  };
+
+  const pullFormModels = async () => {
+    if (!editing?.providerId) return;
+    setError(null);
+    setFormModelsBusy(true);
+    try {
+      setFormModels(await window.tokenMonitor.listRouterProviderModels(editing.providerId));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '拉取模型失败');
+    } finally {
+      setFormModelsBusy(false);
+    }
+  };
+
   const saveRename = async () => {
     if (!renaming || !renaming.to.trim()) return;
     setError(null);
@@ -140,6 +196,16 @@ export function Models({
             <Plus size={15} />
             添加渠道
           </button>
+          <button
+            type="button"
+            className="router-btn"
+            onClick={() => void runTest(null)}
+            disabled={test.running || groups.every((group) => group.enabledCount === 0)}
+            title="向每个启用的渠道发送一条最小测试请求（max_tokens=1）"
+          >
+            <Activity size={15} className={test.running ? 'spin' : ''} />
+            {test.running ? '检测中…' : '一键模型检测'}
+          </button>
         </div>
       </div>
 
@@ -157,12 +223,15 @@ export function Models({
               <th>上游模型</th>
               <th>协议</th>
               <th>状态</th>
+              <th>检测</th>
               <th />
             </tr>
           </thead>
           <tbody>
             {visible.map((group) =>
-              group.channels.map((channel, index) => (
+              group.channels.map((channel, index) => {
+                const result = test.results.get(testKey(group.publicName, channel.providerName));
+                return (
                 <tr key={channel.id} className={channel.archivedAt ? 'archived' : ''}>
                   <td>
                     {index === 0 ? <strong className="mono">{group.publicName}</strong> : <span className="router-cell-sub mono">↳</span>}
@@ -182,6 +251,33 @@ export function Models({
                       <RouterBadge tone="good">启用</RouterBadge>
                     ) : (
                       <RouterBadge tone="warn">停用</RouterBadge>
+                    )}
+                  </td>
+                  <td>
+                    {test.running ? (
+                      <span className="router-cell-sub">检测中…</span>
+                    ) : result ? (
+                      result.ok ? (
+                        <RouterBadge tone="good">
+                          通 · {(result.durationMs! / 1000).toFixed(1)}s
+                        </RouterBadge>
+                      ) : (
+                        <span title={result.error ?? ''}>
+                          <RouterBadge tone="danger">失败</RouterBadge>
+                          <div className="router-cell-sub">{result.error?.slice(0, 60)}</div>
+                        </span>
+                      )
+                    ) : channel.enabled && !channel.archivedAt ? (
+                      <button
+                        type="button"
+                        className="router-btn"
+                        onClick={() => void runTest(group.publicName)}
+                        title="检测该模型组的全部渠道"
+                      >
+                        检测
+                      </button>
+                    ) : (
+                      <span className="router-cell-sub">—</span>
                     )}
                   </td>
                   <td>
@@ -236,11 +332,12 @@ export function Models({
                     </div>
                   </td>
                 </tr>
-              )),
+                );
+              }),
             )}
             {visible.length === 0 ? (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={7}>
                   <div className="router-empty-inline">没有模型渠道。添加后，客户端即可用对外模型名调用本地网关。</div>
                 </td>
               </tr>
@@ -310,10 +407,31 @@ export function Models({
             <Field label="对外模型名" hint="客户端请求里使用的 model">
               <input className="router-input mono" value={editing.publicName} onChange={(event) => setEditing({ ...editing, publicName: event.target.value })} placeholder="gpt-4o-mini" />
             </Field>
-            <Field label="上游模型名" hint="发给提供商的真实 model">
-              <input className="router-input mono" value={editing.upstreamName} onChange={(event) => setEditing({ ...editing, upstreamName: event.target.value })} placeholder="gpt-4o-mini" />
+            <Field label="上游模型名" hint="发给提供商的真实 model；可从上游拉取选择">
+              <input
+                className="router-input mono"
+                value={editing.upstreamName}
+                onChange={(event) => setEditing({ ...editing, upstreamName: event.target.value })}
+                placeholder="gpt-4o-mini"
+                list="upstream-model-options"
+              />
             </Field>
           </div>
+          <datalist id="upstream-model-options">
+            {formModels.map((model) => (
+              <option key={model} value={model} />
+            ))}
+          </datalist>
+          <button
+            type="button"
+            className="router-btn"
+            onClick={() => void pullFormModels()}
+            disabled={formModelsBusy || !editing.providerId}
+            title="从提供商 /models 接口拉取可用模型，填充到上方输入的自动补全"
+          >
+            <ListTree size={13} />
+            {formModelsBusy ? '拉取中…' : '拉取模型列表'}
+          </button>
           <label className="router-check">
             <input type="checkbox" checked={editing.enabled} onChange={(event) => setEditing({ ...editing, enabled: event.target.checked })} />
             参与路由

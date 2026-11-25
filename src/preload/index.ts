@@ -19,6 +19,8 @@ const api: TokenMonitorApi = {
   renameRouterModelGroup: (from, to) => ipcRenderer.invoke(IPC.renameRouterModelGroup, from, to),
   setRouterModelGroupEnabled: (publicName, enabled) =>
     ipcRenderer.invoke(IPC.setRouterModelGroupEnabled, publicName, enabled),
+  listRouterProviderModels: (providerId) => ipcRenderer.invoke(IPC.listRouterProviderModels, providerId),
+  testRouterModels: (publicName) => ipcRenderer.invoke(IPC.testRouterModels, publicName ?? null),
   getRouterServiceConfig: () => ipcRenderer.invoke(IPC.getRouterServiceConfig),
   saveRouterServiceConfig: (patch) => ipcRenderer.invoke(IPC.saveRouterServiceConfig, patch),
   regenerateRouterApiKey: () => ipcRenderer.invoke(IPC.regenerateRouterApiKey),

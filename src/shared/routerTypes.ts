@@ -160,6 +160,16 @@ export interface RouterClientProviderFlow {
   requestCount: number;
 }
 
+export interface RouterModelTestResult {
+  publicModel: string;
+  providerName: string;
+  upstreamModel: string;
+  ok: boolean;
+  status: number | null;
+  durationMs: number | null;
+  error: string | null;
+}
+
 export interface RouterLogEntry {
   id: number;
   requestId: string;

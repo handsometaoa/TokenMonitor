@@ -16,6 +16,18 @@ function bodyLanguage(value: string | null): 'json' | 'plaintext' {
   }
 }
 
+/** Total input side: non-cached prompt + cache read + cache write. */
+function contextTokens(entry: RouterLogEntry): number {
+  return entry.promptTokens + entry.cacheReadTokens + entry.cacheWriteTokens;
+}
+
+/** Share of input tokens served from the prompt cache. */
+function cacheHitPercent(entry: RouterLogEntry): number | null {
+  const context = contextTokens(entry);
+  if (context <= 0) return null;
+  return (entry.cacheReadTokens / context) * 100;
+}
+
 export function Logs({ onError }: { onError: (message: string) => void }) {
   const [page, setPage] = useState<RouterLogPage>({ items: [], total: 0 });
   const [offset, setOffset] = useState(0);
@@ -100,6 +112,8 @@ export function Logs({ onError }: { onError: (message: string) => void }) {
               <th>渠道</th>
               <th>状态</th>
               <th>耗时</th>
+              <th>上下文</th>
+              <th>缓存命中</th>
               <th>Tokens</th>
               <th>来源</th>
             </tr>
@@ -120,13 +134,19 @@ export function Logs({ onError }: { onError: (message: string) => void }) {
                   <RouterBadge tone={statusTone(entry.status)}>{entry.status ?? '进行中'}</RouterBadge>
                 </td>
                 <td className="mono">{formatRouterDuration(entry.durationMs)}</td>
+                <td className="mono">{contextTokens(entry).toLocaleString()}</td>
+                <td className="mono">
+                  {cacheHitPercent(entry) === null
+                    ? '—'
+                    : `${cacheHitPercent(entry)!.toFixed(0)}%`}
+                </td>
                 <td className="mono">{entry.totalTokens.toLocaleString()}</td>
                 <td className="mono">{entry.client ?? '—'}</td>
               </tr>
             ))}
             {page.items.length === 0 ? (
               <tr>
-                <td colSpan={7}>
+                <td colSpan={9}>
                   <div className="router-empty-inline">{loading ? '读取中…' : '还没有请求日志。'}</div>
                 </td>
               </tr>
@@ -179,16 +199,30 @@ export function Logs({ onError }: { onError: (message: string) => void }) {
               </strong>
             </div>
             <div>
+              <span>上下文大小</span>
+              <strong>{contextTokens(selected).toLocaleString()}</strong>
+            </div>
+            <div>
+              <span>缓存命中</span>
+              <strong>
+                {cacheHitPercent(selected) === null ? '—' : `${cacheHitPercent(selected)!.toFixed(1)}%`}
+              </strong>
+            </div>
+            <div>
               <span>Prompt</span>
               <strong>{selected.promptTokens.toLocaleString()}</strong>
             </div>
             <div>
-              <span>Completion</span>
-              <strong>{selected.completionTokens.toLocaleString()}</strong>
-            </div>
-            <div>
               <span>Cache read</span>
               <strong>{selected.cacheReadTokens.toLocaleString()}</strong>
+            </div>
+            <div>
+              <span>Cache write</span>
+              <strong>{selected.cacheWriteTokens.toLocaleString()}</strong>
+            </div>
+            <div>
+              <span>Completion</span>
+              <strong>{selected.completionTokens.toLocaleString()}</strong>
             </div>
             <div>
               <span>Total</span>

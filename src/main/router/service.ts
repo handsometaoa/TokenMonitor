@@ -9,6 +9,7 @@ import type {
   RouterLogPage,
   RouterLogQuery,
   RouterModelGroup,
+  RouterModelTestResult,
   RouterModelInput,
   RouterProvider,
   RouterProviderInput,
@@ -26,6 +27,8 @@ import type { ProviderSecretStore } from '../services/providerSecrets';
 import { RouterBalancer } from './balancer';
 import { RouterRepository, type RouterProviderRow } from './db';
 import { RouterGateway, type RouterFetch } from './gateway';
+import { adapterFor } from './protocol/registry';
+import type { Conversation } from './protocol/types';
 import { ROUTER_QUOTA_STRATEGIES, executeQuotaStrategy, quotaStrategyInfo } from './quota';
 
 function maskKey(secret: string | null): string | null {
@@ -250,6 +253,118 @@ export class RouterService extends EventEmitter {
       enabledCount: group.channels.filter((channel) => channel.enabled).length,
       totalCount: group.channels.length,
     }));
+  }
+
+  async listProviderModels(providerId: string): Promise<string[]> {
+    const provider = this.repo.getProvider(providerId);
+    if (!provider) throw new Error('提供商不存在');
+    const apiKey = this.secrets.get(secretKey(providerId));
+    if (!apiKey) throw new Error('该提供商尚未配置 API Key，请先在编辑里保存密钥');
+    const adapter = adapterFor(provider.protocol);
+    const url = `${provider.baseUrl.replace(/\/+$/, '')}/models`;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        headers: { ...adapter.authHeaders(apiKey), accept: 'application/json' },
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch (error) {
+      throw new Error(`连接上游失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (response.status === 401 || response.status === 403) throw new Error('API Key 无效或已过期');
+    if (!response.ok) throw new Error(`模型列表接口 HTTP ${response.status}`);
+    const body = (await response.json()) as unknown;
+    const list = body && typeof body === 'object' && Array.isArray((body as Record<string, unknown>).data)
+      ? ((body as Record<string, unknown>).data as unknown[])
+      : Array.isArray(body)
+        ? body
+        : [];
+    const ids = list
+      .map((item) => (item && typeof item === 'object' ? (item as Record<string, unknown>).id : item))
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
+  }
+
+  async testModelRoutes(publicName: string | null): Promise<RouterModelTestResult[]> {
+    const groups = this.repo
+      .listModelGroups(false)
+      .filter((group) => !publicName || group.publicName === publicName);
+    const targets = groups.flatMap((group) =>
+      group.channels
+        .filter((channel) => channel.enabled && !channel.archivedAt)
+        .map((channel) => ({
+          publicModel: group.publicName,
+          providerId: channel.providerId,
+          providerName: channel.providerName,
+          protocol: channel.providerProtocol,
+          upstreamModel: channel.upstreamName,
+        })),
+    );
+    if (targets.length === 0) return [];
+
+    const run = async (target: (typeof targets)[number]): Promise<RouterModelTestResult> => {
+      const base: RouterModelTestResult = {
+        publicModel: target.publicModel,
+        providerName: target.providerName,
+        upstreamModel: target.upstreamModel,
+        ok: false,
+        status: null,
+        durationMs: null,
+        error: null,
+      };
+      const provider = this.repo.getProvider(target.providerId);
+      const apiKey = provider ? this.secrets.get(secretKey(provider.id)) : null;
+      if (!provider || !apiKey) return { ...base, error: '缺少 API Key' };
+      const adapter = adapterFor(target.protocol);
+      const conversation: Conversation = {
+        stream: false,
+        system: [],
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'ping' }], toolCalls: [] }],
+        tools: [],
+        toolChoice: null,
+        temperature: null,
+        topP: null,
+        maxOutputTokens: 1,
+        stop: [],
+        reasoningEffort: null,
+      };
+      let wire: { body: unknown; stream: boolean };
+      try {
+        wire = adapter.buildRequest(conversation, target.upstreamModel);
+      } catch (error) {
+        return { ...base, error: `构造请求失败：${error instanceof Error ? error.message : String(error)}` };
+      }
+      const url = `${provider.baseUrl.replace(/\/+$/, '')}${adapter.upstreamPath}`;
+      const startedAt = Date.now();
+      try {
+        const response = await this.fetchImpl(url, {
+          method: 'POST',
+          headers: {
+            ...adapter.authHeaders(apiKey),
+            'content-type': 'application/json',
+            accept: 'application/json',
+          },
+          body: JSON.stringify(wire.body),
+          signal: AbortSignal.timeout(25_000),
+        });
+        const durationMs = Date.now() - startedAt;
+        if (response.ok) return { ...base, ok: true, status: response.status, durationMs, error: null };
+        const text = await response.text().catch(() => '');
+        const kind = response.status === 401 || response.status === 403 ? '凭证无效' : response.status === 429 ? '已限流' : '上游错误';
+        return { ...base, status: response.status, durationMs, error: `${kind}（HTTP ${response.status}）：${text.slice(0, 200)}` };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { ...base, durationMs: Date.now() - startedAt, error: /abort|timeout/i.test(message) ? '请求超时（25s）' : `网络错误：${message}` };
+      }
+    };
+
+    // Run in small batches so a page-full of channels does not hammer providers at once.
+    const results: RouterModelTestResult[] = [];
+    const batchSize = 4;
+    for (let index = 0; index < targets.length; index += batchSize) {
+      results.push(...(await Promise.all(targets.slice(index, index + batchSize).map(run))));
+    }
+    return results;
   }
 
   saveModel(input: RouterModelInput): RouterModelGroup[] {

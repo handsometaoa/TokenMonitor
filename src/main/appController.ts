@@ -39,6 +39,7 @@ import type {
   RouterQuotaStrategyInfo,
   RouterServiceConfig,
   RouterState,
+  RouterModelTestResult,
   RouterUsageOverview,
   RouterUsageRange,
 } from '../shared/routerTypes';
@@ -280,6 +281,14 @@ export class AppController extends EventEmitter {
 
   setRouterModelGroupEnabled(publicName: string, enabled: boolean): RouterModelGroup[] {
     return this.router.setModelGroupEnabled(publicName, enabled);
+  }
+
+  async listRouterProviderModels(providerId: string): Promise<string[]> {
+    return this.router.listProviderModels(providerId);
+  }
+
+  async testRouterModels(publicName: string | null): Promise<RouterModelTestResult[]> {
+    return this.router.testModelRoutes(publicName);
   }
 
   getRouterServiceConfig(): RouterServiceConfig {

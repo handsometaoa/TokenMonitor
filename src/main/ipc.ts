@@ -363,6 +363,20 @@ export function registerIpc(
     return controller.clearRouterLogs();
   });
 
+  ipcMain.handle(IPC.listRouterProviderModels, async (event, providerId: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = z.string().min(1).max(100).safeParse(providerId);
+    if (!parsed.success) throw new Error('Invalid provider id');
+    return controller.listRouterProviderModels(parsed.data);
+  });
+
+  ipcMain.handle(IPC.testRouterModels, async (event, publicName: unknown) => {
+    assertTrusted(event, windows);
+    const parsed = z.string().max(200).nullable().optional().safeParse(publicName ?? null);
+    if (!parsed.success) throw new Error('Invalid model name');
+    return controller.testRouterModels(parsed.data ?? null);
+  });
+
   ipcMain.handle(IPC.openRouterWindow, (event) => {
     assertTrusted(event, windows);
     windows.showRouter();

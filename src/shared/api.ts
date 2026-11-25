@@ -15,6 +15,7 @@ import type {
   RouterLogQuery,
   RouterModelGroup,
   RouterModelInput,
+  RouterModelTestResult,
   RouterProvider,
   RouterProviderInput,
   RouterQuotaSnapshot,
@@ -41,6 +42,8 @@ export interface TokenMonitorApi {
   deleteRouterModel(id: string): Promise<RouterModelGroup[]>;
   renameRouterModelGroup(from: string, to: string): Promise<RouterModelGroup[]>;
   setRouterModelGroupEnabled(publicName: string, enabled: boolean): Promise<RouterModelGroup[]>;
+  listRouterProviderModels(providerId: string): Promise<string[]>;
+  testRouterModels(publicName?: string | null): Promise<RouterModelTestResult[]>;
   getRouterServiceConfig(): Promise<RouterServiceConfig>;
   saveRouterServiceConfig(patch: Partial<RouterServiceConfig>): Promise<RouterState>;
   regenerateRouterApiKey(): Promise<RouterState>;
@@ -89,6 +92,8 @@ export const IPC = {
   deleteRouterModel: 'router:delete-model',
   renameRouterModelGroup: 'router:rename-model-group',
   setRouterModelGroupEnabled: 'router:set-model-group-enabled',
+  listRouterProviderModels: 'router:list-provider-models',
+  testRouterModels: 'router:test-models',
   getRouterServiceConfig: 'router:get-service',
   saveRouterServiceConfig: 'router:save-service',
   regenerateRouterApiKey: 'router:regenerate-key',

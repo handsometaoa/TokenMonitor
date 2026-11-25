@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Archive, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { Archive, ListTree, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import type {
   RouterProvider,
   RouterProviderInput,
@@ -85,6 +85,8 @@ export function Providers({
   const [editing, setEditing] = useState<FormState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [fetchingModelProvider, setFetchingModelProvider] = useState<string | null>(null);
+  const [fetchedModels, setFetchedModels] = useState<{ providerName: string; models: string[] } | null>(null);
 
   useEffect(() => {
     setProviders(initial);
@@ -140,6 +142,19 @@ export function Providers({
     if (!window.confirm(`删除提供商「${provider.name}」及其全部模型映射？`)) return;
     await window.tokenMonitor.deleteRouterProvider(provider.id);
     await reload();
+  };
+
+  const fetchModels = async (provider: RouterProvider) => {
+    setError(null);
+    setFetchingModelProvider(provider.id);
+    try {
+      const models = await window.tokenMonitor.listRouterProviderModels(provider.id);
+      setFetchedModels({ providerName: provider.name, models });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '拉取模型失败');
+    } finally {
+      setFetchingModelProvider(null);
+    }
   };
 
   return (
@@ -203,6 +218,15 @@ export function Providers({
                 </td>
                 <td>
                   <div className="router-row-actions">
+                    <button
+                      type="button"
+                      className="router-icon-btn"
+                      title="拉取模型列表"
+                      disabled={!provider.hasKey || fetchingModelProvider === provider.id}
+                      onClick={() => void fetchModels(provider)}
+                    >
+                      <ListTree size={14} />
+                    </button>
                     <button
                       type="button"
                       className="router-icon-btn"
@@ -348,6 +372,46 @@ export function Providers({
               />
             </Field>
           </div>
+        </RouterModal>
+      ) : null}
+
+      {fetchedModels ? (
+        <RouterModal
+          title={`可用模型 · ${fetchedModels.providerName}`}
+          subtitle={`共 ${fetchedModels.models.length} 个模型，来自上游 /models 接口`}
+          width={640}
+          onClose={() => setFetchedModels(null)}
+          footer={
+            <button
+              type="button"
+              className="router-btn"
+              onClick={() => void navigator.clipboard.writeText(fetchedModels.models.join('\n'))}
+            >
+              复制全部
+            </button>
+          }
+        >
+          {fetchedModels.models.length === 0 ? (
+            <div className="router-empty-inline">上游返回了空列表。</div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 420, overflowY: 'auto' }}>
+              {fetchedModels.models.map((model) => (
+                <span
+                  key={model}
+                  className="mono"
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 999,
+                    border: '1px solid var(--border-strong)',
+                    background: 'var(--surface-3)',
+                    fontSize: 11,
+                  }}
+                >
+                  {model}
+                </span>
+              ))}
+            </div>
+          )}
         </RouterModal>
       ) : null}
     </div>
