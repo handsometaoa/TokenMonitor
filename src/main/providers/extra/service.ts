@@ -5,7 +5,7 @@ import type {
   ExtraProviderState,
   ProviderError,
 } from '../../../shared/types';
-import { EXTRA_PROVIDER_IDS } from '../../../shared/types';
+import { EXTRA_PROVIDER_IDS, agentQuotaKey } from '../../../shared/types';
 import { EXTRA_PROVIDER_NAMES } from '../../../shared/providers';
 import { computePace } from '../../services/pace';
 import type { Logger } from '../../services/logger';
@@ -227,7 +227,7 @@ export class ExtraProviderService extends EventEmitter {
   }
 
   getStates(): ExtraProviderState[] {
-    return EXTRA_PROVIDER_IDS.map((id) => structuredClone(this.states.get(id)!));
+    return EXTRA_PROVIDER_IDS.filter((id) => this.agentEnabled(id)).map((id) => structuredClone(this.states.get(id)!));
   }
 
   getState(providerId: ExtraProviderId): ExtraProviderState {
@@ -256,17 +256,38 @@ export class ExtraProviderService extends EventEmitter {
     this.emit('changed');
   }
 
+  private agentEnabled(providerId: ExtraProviderId): boolean {
+    // Disabled agents are not scanned at all: no credential file reads, no quota requests.
+    return this.settings.get().quotaVisibility[agentQuotaKey(providerId)] !== false;
+  }
+
   private async doRefresh(_manual: boolean): Promise<void> {
     for (const state of this.states.values()) {
       if (state.configured) state.loading = true;
     }
     this.emit('changed');
-    await Promise.all(EXTRA_PROVIDER_IDS.map((id) => this.refreshProvider(id, false)));
+    await Promise.all(EXTRA_PROVIDER_IDS.filter((id) => this.agentEnabled(id)).map((id) => this.refreshProvider(id, false)));
     this.emit('changed');
     if (this.started) this.schedule();
   }
 
   private async refreshProvider(providerId: ExtraProviderId, emit = true): Promise<void> {
+    if (!this.agentEnabled(providerId)) {
+      // Keep the entry unconfigured so no UI shows quota for a disabled agent.
+      const meta = rawMeta(providerId);
+      this.states.set(providerId, {
+        ...meta,
+        configured: false,
+        source: 'none',
+        snapshot: null,
+        error: null,
+        loading: false,
+        stale: false,
+        fetchedAt: null,
+      });
+      if (emit) this.emit('changed');
+      return;
+    }
     const state = this.states.get(providerId)!;
     const credential = resolveExtraCredential(providerId, this.secrets);
     if (!credential) {

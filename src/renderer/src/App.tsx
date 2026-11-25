@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { EyeOff, Gauge, LayoutDashboard, Network, RefreshCw, Settings2, X } from 'lucide-react';
 import type { AppState } from '../../shared/types';
-import { agentQuotaKey, routerQuotaIdentity } from '../../shared/types';
+import { agentQuotaKey, routerQuotaIdentity, EXTRA_PROVIDER_IDS } from '../../shared/types';
+import { EXTRA_PROVIDER_NAMES } from '../../shared/providers';
 import { BrandMark } from './components/Logo';
 import { ExtraProviderCard, UnconnectedProviders } from './components/ExtraProviderCard';
 import { ProviderCard } from './components/ProviderCard';
@@ -127,7 +128,7 @@ export function App() {
 
   const openSettings = () => void window.tokenMonitor.openSettings();
   const refresh = () => void window.tokenMonitor.refreshQuota();
-  const onboarding = !state.settings.onboardingCompleted && !state.credentials.configured;
+  const onboarding = !state.settings.onboardingCompleted;
   const status = statusOf(state, language === 'zh-CN');
 
   // Per-agent visibility for the quota tab; same setting drives the overview rows and the tray.
@@ -141,10 +142,11 @@ export function App() {
     (provider) => (provider.snapshot || provider.configured) && quotaVisible(provider.providerId),
   );
   const hiddenQuotaAgents = new Map<string, string>();
-  if (state.quota.snapshot && !quotaVisible('opencode')) hiddenQuotaAgents.set(agentQuotaKey('opencode'), 'OpenCode Go');
-  for (const provider of state.extraProviders) {
-    if (!quotaVisible(provider.providerId) && !hiddenQuotaAgents.has(agentQuotaKey(provider.providerId))) {
-      hiddenQuotaAgents.set(agentQuotaKey(provider.providerId), provider.providerName);
+  if (state.quota.snapshot === null && !quotaVisible('opencode')) hiddenQuotaAgents.set(agentQuotaKey('opencode'), 'OpenCode Go');
+  for (const providerId of EXTRA_PROVIDER_IDS) {
+    const key = agentQuotaKey(providerId);
+    if (!quotaVisible(providerId) && !hiddenQuotaAgents.has(key)) {
+      hiddenQuotaAgents.set(key, EXTRA_PROVIDER_NAMES[providerId]);
     }
   }
 

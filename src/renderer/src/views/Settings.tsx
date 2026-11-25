@@ -239,7 +239,11 @@ export function SettingsPage({
                 </div>
                 {state.demo ? <Banner tone="info">{t('settings.demoNote')}</Banner> : null}
               </SectionCard>
-              <SubscriptionCredentials state={state} language={language} onChanged={() => undefined} />
+              <SubscriptionCredentials
+                state={state}
+                language={language}
+                onChanged={() => void window.tokenMonitor.refreshQuota()}
+              />
             </>
           ) : null}
 

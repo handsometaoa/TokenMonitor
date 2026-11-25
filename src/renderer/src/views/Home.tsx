@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Copy, Eye, EyeOff, Gauge, Network, RefreshCw, Server, Zap } from 'lucide-react';
-import { agentQuotaKey, routerQuotaIdentity } from '../../../shared/types';
+import { agentQuotaKey, routerQuotaIdentity, EXTRA_PROVIDER_IDS } from '../../../shared/types';
 import type { AppState, Language } from '../../../shared/types';
+import { EXTRA_PROVIDER_NAMES } from '../../../shared/providers';
 import type { RouterLogPage, RouterUsageOverview } from '../../../shared/routerTypes';
 import { LineChart, type LineSeries } from '../components/LineChart';
 import { Spinner } from '../components/ui';
@@ -280,14 +281,15 @@ export function Home({
       .slice(0, 6);
   }, [state.quota.snapshot, state.extraProviders, state.settings.quotaVisibility, router.quota, copy.balance, zh]);
 
-  /** Hidden identities (not shown in the list) so the eye toggle can bring them back. */
+  /** Hidden identities (not shown in the list) so the eye toggle can bring them back.
+   *  Iterates the static agent list: scan-disabled agents never appear in state sources. */
   const hiddenQuotas = useMemo<Array<{ key: string; name: string }>>(() => {
     const shown = new Set(quotas.map((item) => item.key));
     const visibility = state.settings.quotaVisibility;
     const all = new Map<string, string>();
-    if (state.quota.snapshot) all.set(agentQuotaKey('opencode'), state.quota.snapshot.planLabel || 'OpenCode Go');
-    for (const provider of state.extraProviders) {
-      if (provider.snapshot || provider.configured) all.set(agentQuotaKey(provider.providerId), provider.providerName);
+    all.set(agentQuotaKey('opencode'), 'OpenCode Go');
+    for (const providerId of EXTRA_PROVIDER_IDS) {
+      all.set(agentQuotaKey(providerId), EXTRA_PROVIDER_NAMES[providerId]);
     }
     for (const item of router.quota) {
       const identity = routerQuotaIdentity(item.providerId, item.strategyId);
@@ -296,7 +298,7 @@ export function Home({
     return [...all.entries()]
       .filter(([key]) => visibility[key] === false && !shown.has(key))
       .map(([key, name]) => ({ key, name }));
-  }, [quotas, state.quota.snapshot, state.extraProviders, router.quota, state.settings.quotaVisibility]);
+  }, [quotas, router.quota, state.settings.quotaVisibility, state.quota.snapshot]);
 
   const toggleQuotaVisibility = (identity: string) => {
     const current = state.settings.quotaVisibility;

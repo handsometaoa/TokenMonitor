@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { ProviderError, ProviderSnapshot, QuotaState } from '../../shared/types';
-import { QUOTA_API_URL } from '../../shared/types';
+import { QUOTA_API_URL, agentQuotaKey } from '../../shared/types';
 import type { FetchLike } from '../providers/opencodeGo/api';
 import { OpenCodeGoUsageApi, UsageApiError } from '../providers/opencodeGo/api';
 import { buildDemoRawSnapshot } from '../providers/opencodeGo/demo';
@@ -49,9 +49,27 @@ export class QuotaService extends EventEmitter {
     return structuredClone(this.state);
   }
 
+  private openCodeEnabled(): boolean {
+    // Master switch: a disabled OpenCode Go agent is never scanned or shown.
+    return this.settings.get().quotaVisibility[agentQuotaKey('opencode')] !== false;
+  }
+
   start(): void {
     this.started = true;
     this.loadCache();
+    if (!this.openCodeEnabled()) {
+      this.clearTimer();
+      this.state = {
+        snapshot: null,
+        error: null,
+        fetchedAt: null,
+        stale: false,
+        loading: false,
+        configured: false,
+      };
+      this.emitState();
+      return;
+    }
     this.refresh().catch((error) => this.logger.error('Initial quota refresh failed.', error));
   }
 
@@ -99,6 +117,19 @@ export class QuotaService extends EventEmitter {
   }
 
   private async doRefresh(): Promise<QuotaState> {
+    if (!this.openCodeEnabled()) {
+      this.clearTimer();
+      this.state = {
+        snapshot: null,
+        error: null,
+        fetchedAt: null,
+        stale: false,
+        loading: false,
+        configured: false,
+      };
+      this.emitState();
+      return this.getState();
+    }
     if (this.demo) {
       const raw = buildDemoRawSnapshot();
       const snapshot = buildProviderSnapshot(raw, 'demo');

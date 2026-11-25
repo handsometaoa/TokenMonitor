@@ -96,7 +96,14 @@ export class SettingsStore extends EventEmitter {
 
   private load(): AppSettings {
     const defaults = createDefaultSettings();
-    if (!existsSync(this.filePath)) return defaults;
+    if (!existsSync(this.filePath)) {
+      // Fresh install: nothing is monitored until the user picks agents in onboarding.
+      const freshHidden: Record<string, boolean> = {};
+      for (const key of ['agent:opencode', 'agent:codex', 'agent:claude', 'agent:cursor', 'agent:zai']) {
+        freshHidden[key] = false;
+      }
+      return { ...defaults, quotaVisibility: freshHidden };
+    }
 
     try {
       const raw = JSON.parse(readFileSync(this.filePath, 'utf8')) as unknown;

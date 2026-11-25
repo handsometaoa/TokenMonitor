@@ -6,14 +6,15 @@ import type {
   CredentialTestResult,
   ExtraProviderId,
 } from '../../../shared/types';
-import { EXTRA_PROVIDER_IDS } from '../../../shared/types';
+import { EXTRA_PROVIDER_IDS, agentQuotaKey } from '../../../shared/types';
 import { EXTRA_PROVIDER_NAMES, EXTRA_PROVIDER_URLS } from '../../../shared/providers';
-import { Banner, SectionCard, Spinner } from '../components/ui';
-import { RouterBadge } from '../router/components';
+import { Banner, SectionCard, Spinner, Toggle } from '../components/ui';
+
 
 /**
- * 订阅额度凭证管理：自动检测本机登录态（~/.codex/auth.json 等）+ 手动粘贴覆盖。
- * 该能力只用于查询订阅余量，不参与网关转发；转发用的 API Key 在路由控制台「提供商」页配置。
+ * 订阅额度凭证管理：每个 Agent 一个总开关。
+ * 开启 → 扫描本机登录态 / 允许手动粘贴密钥 / 显示余量；
+ * 关闭 → 完全不扫描、不显示该 Agent 的任何余量信息。
  */
 export function SubscriptionCredentials({
   state,
@@ -40,6 +41,14 @@ export function SubscriptionCredentials({
   useEffect(() => {
     setProviderInputs({ codex: '', claude: '', cursor: '', zai: '', zcode: '' });
   }, [state.version]);
+
+  const visibility = state.settings.quotaVisibility;
+  const isEnabled = (providerId: string) => visibility[agentQuotaKey(providerId)] !== false;
+
+  const setAgentEnabled = (providerId: string, enabled: boolean) => {
+    void window.tokenMonitor.updateSettings({ quotaVisibility: { [agentQuotaKey(providerId)]: enabled } });
+    onChanged();
+  };
 
   const detect = async () => {
     setBusy('detect');
@@ -108,18 +117,6 @@ export function SubscriptionCredentials({
     }
   };
 
-  const providerPlaceholder = (providerId: ExtraProviderId): string => {
-    switch (providerId) {
-      case 'cursor':
-        return zh ? 'Cookie header 或 session token' : 'Cookie header or session token';
-      case 'zai':
-      case 'zcode':
-        return zh ? 'API Key 或 JSON（团队版）' : 'API key or team JSON';
-      default:
-        return zh ? 'OAuth access token' : 'OAuth access token';
-    }
-  };
-
   const sourceLabel = (source: string): string => {
     switch (source) {
       case 'manual':
@@ -137,150 +134,168 @@ export function SubscriptionCredentials({
     }
   };
 
+  const toggleFor = (providerId: string, label: string) => (
+    <Toggle
+      checked={isEnabled(providerId)}
+      onChange={(next) => setAgentEnabled(providerId, next)}
+      label={label}
+    />
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <Banner tone="info">
         {zh
-          ? '这些凭证用于查询订阅余量（自动检测本机登录态），与网关转发的 API Key 相互独立。'
-          : 'These credentials query subscription quota (auto-detected from local sign-in); they are independent from gateway API keys.'}
+          ? '每个 Agent 独立开关：开启后才会扫描本机登录态 / 使用密钥并显示余量；关闭则完全不显示。凭证与网关转发的 API Key 相互独立。'
+          : 'Each agent has its own switch: enabled agents are scanned (local sign-in / key) and show quota; disabled ones are hidden entirely. Independent from gateway API keys.'}
       </Banner>
 
       <SectionCard
-        title={zh ? 'OpenCode Go 凭证' : 'OpenCode Go credential'}
+        title={zh ? 'OpenCode Go' : 'OpenCode Go'}
         subtitle={zh ? '额度总览的数据来源' : 'Source of the quota overview'}
         action={
-          <button type="button" className="router-btn" onClick={() => void detect()} disabled={busy !== null}>
-            {busy === 'detect' ? <Spinner size={13} /> : <KeyRound size={13} />}
-            {zh ? '重新检测' : 'Detect'}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {isEnabled('opencode') ? (
+              <button type="button" className="btn btn-sm" onClick={() => void detect()} disabled={busy !== null}>
+                {busy === 'detect' ? <Spinner size={13} /> : <KeyRound size={13} />}
+                {zh ? '重新检测' : 'Detect'}
+              </button>
+            ) : null}
+            {toggleFor('opencode', 'OpenCode Go')}
+          </div>
         }
       >
-        <div className="settings-row" style={{ paddingTop: 0 }}>
-          <div className="settings-row-copy">
-            <strong>
-              {state.credentials.configured
-                ? zh
-                  ? '已连接'
-                  : 'Connected'
-                : zh
-                  ? '未配置'
-                  : 'Not configured'}
-            </strong>
-            <span className="mono">{state.credentials.masked ?? '—'}</span>
-            <span>
-              {state.credentials.kind === 'manual'
-                ? zh ? '手动凭证' : 'Manual'
-                : state.credentials.kind === 'env'
-                  ? zh ? '环境变量' : 'Environment'
-                  : state.credentials.kind === 'auth-file'
-                    ? zh ? '本机登录态' : 'Local sign-in'
-                    : zh ? '未检测' : 'Not detected'}
-            </span>
-          </div>
-          <div className="settings-control">
-            <span className={`router-badge ${state.credentials.configured ? 'good' : 'warn'}`}>
-              {state.credentials.configured ? (zh ? '正常' : 'OK') : zh ? '未配置' : 'Missing'}
-            </span>
-          </div>
-        </div>
-        {detection ? (
-          detection.found ? (
-            <Banner tone="info">
-              {zh ? `检测到本机凭证 ${detection.masked ?? ''}，额度监控将自动使用。` : `Detected local credential ${detection.masked ?? ''}.`}
-            </Banner>
-          ) : (
-            <Banner tone="warn">{detection.message}</Banner>
-          )
-        ) : null}
-        {result ? (
-          <div style={{ marginTop: 10 }}>
-            <Banner tone={result.ok ? 'info' : 'danger'}>{result.ok ? (result.message ?? (zh ? '已保存。' : 'Saved.')) : result.message}</Banner>
-          </div>
-        ) : null}
+        {isEnabled('opencode') ? (
+          <>
+            <div className="settings-row" style={{ paddingTop: 0 }}>
+              <div className="settings-row-copy">
+                <strong>{state.credentials.configured ? (zh ? '已连接' : 'Connected') : zh ? '未配置' : 'Not configured'}</strong>
+                <span className="mono">{state.credentials.masked ?? '—'}</span>
+                <span>
+                  {state.credentials.kind === 'manual'
+                    ? zh ? '手动凭证' : 'Manual'
+                    : state.credentials.kind === 'env'
+                      ? zh ? '环境变量' : 'Environment'
+                      : state.credentials.kind === 'auth-file'
+                        ? zh ? '本机登录态' : 'Local sign-in'
+                        : zh ? '未检测' : 'Not detected'}
+                </span>
+              </div>
+              <div className="settings-control">
+                <span className={`chip ${state.credentials.configured ? 'good' : 'warn'}`}>{state.credentials.configured ? (zh ? '正常' : 'OK') : zh ? '未配置' : 'Missing'}</span>
+              </div>
+            </div>
+            {detection ? (
+              detection.found ? (
+                <Banner tone="info">
+                  {zh ? `检测到本机凭证 ${detection.masked ?? ''}，额度监控将自动使用。` : `Detected local credential ${detection.masked ?? ''}.`}
+                </Banner>
+              ) : (
+                <Banner tone="warn">{detection.message}</Banner>
+              )
+            ) : null}
+            {result ? (
+              <div style={{ marginTop: 10 }}>
+                <Banner tone={result.ok ? 'info' : 'danger'}>{result.ok ? (result.message ?? (zh ? '已保存。' : 'Saved.')) : result.message}</Banner>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="hint">{zh ? '已关闭：不扫描凭证，不显示余量。' : 'Disabled: no scanning, no quota display.'}</div>
+        )}
       </SectionCard>
 
       {EXTRA_PROVIDER_IDS.map((providerId) => {
+        const enabled = isEnabled(providerId);
         const provider = state.extraProviders.find((item) => item.providerId === providerId) ?? null;
-        const configured = Boolean(provider?.configured);
-        const snapshot = provider?.snapshot ?? null;
+        const configured = enabled && Boolean(provider?.configured);
+        const snapshot = enabled ? (provider?.snapshot ?? null) : null;
         return (
           <SectionCard
             key={providerId}
             title={EXTRA_PROVIDER_NAMES[providerId]}
             subtitle={providerHint(providerId)}
-            action={
-              <span className={`router-badge ${configured ? 'good' : 'warn'}`}>
-                {configured ? sourceLabel(provider?.source ?? 'none') : zh ? '未连接' : 'Not connected'}
-              </span>
-            }
+            action={toggleFor(providerId, EXTRA_PROVIDER_NAMES[providerId])}
           >
-            <div className="settings-row" style={{ paddingTop: 0 }}>
-              <div className="settings-row-copy">
-                <strong>{snapshot?.planLabel ?? (zh ? '未连接' : 'Not connected')}</strong>
-                <span>
-                  {provider?.error && !snapshot
-                    ? provider.error.message
-                    : snapshot
-                      ? `${zh ? '更新于' : 'Updated'} ${new Date(snapshot.fetchedAt).toLocaleString()}`
-                      : providerHint(providerId)}
-                </span>
-              </div>
-              <div className="settings-control">
-                <button
-                  type="button"
-                  className="router-btn"
-                  onClick={() => void window.tokenMonitor.openExternal(EXTRA_PROVIDER_URLS[providerId])}
-                >
-                  <ExternalLink size={12} />
-                  {zh ? '控制台' : 'Console'}
-                </button>
-              </div>
-            </div>
+            {!enabled ? (
+              <div className="hint">{zh ? '已关闭：不扫描凭证，不显示余量。' : 'Disabled: no scanning, no quota display.'}</div>
+            ) : (
+              <>
+                <div className="settings-row" style={{ paddingTop: 0 }}>
+                  <div className="settings-row-copy">
+                    <strong>{snapshot?.planLabel ?? (configured ? zh ? '等待数据' : 'Waiting' : zh ? '未连接' : 'Not connected')}</strong>
+                    <span>
+                      {provider?.error && !snapshot
+                        ? provider.error.message
+                        : snapshot
+                          ? `${zh ? '更新于' : 'Updated'} ${new Date(snapshot.fetchedAt).toLocaleString()}`
+                          : providerHint(providerId)}
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => void window.tokenMonitor.openExternal(EXTRA_PROVIDER_URLS[providerId])}
+                    >
+                      <ExternalLink size={12} />
+                      {zh ? '控制台' : 'Console'}
+                    </button>
+                  </div>
+                </div>
 
-            <div style={{ marginTop: 4 }}>
-              <div className="key-row">
-                <input
-                  className="field"
-                  type="password"
-                  value={providerInputs[providerId]}
-                  onChange={(event) =>
-                    setProviderInputs((current) => ({ ...current, [providerId]: event.target.value }))
-                  }
-                  placeholder={providerPlaceholder(providerId)}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  className="router-btn primary"
-                  disabled={!providerInputs[providerId].trim() || providerBusy === providerId}
-                  onClick={() => void saveProviderSecret(providerId)}
-                >
-                  {providerBusy === providerId ? <Spinner size={12} /> : <Check size={12} />}
-                  {zh ? '保存' : 'Save'}
-                </button>
-                {configured ? (
-                  <button
-                    type="button"
-                    className="router-btn"
-                    disabled={providerBusy === providerId}
-                    onClick={() => void clearProviderSecret(providerId)}
-                  >
-                    <RefreshCw size={12} />
-                    {zh ? '清除手动' : 'Clear manual'}
-                  </button>
-                ) : null}
-              </div>
-              <div className="hint" style={{ marginTop: 5 }}>
-                {providerId === 'zai' || providerId === 'zcode'
-                  ? zh
-                    ? '个人 Key 直接粘贴；BigModel 团队版粘贴 JSON（apiKey + organizationId + projectId）。'
-                    : 'Paste a personal key directly; for BigModel team plans paste JSON with apiKey + organizationId + projectId.'
-                  : zh
-                    ? '凭证使用系统加密保存，不会写入日志或渲染进程。'
-                    : 'Credentials are encrypted with the OS keystore and never sent to the renderer.'}
-              </div>
-            </div>
+                <div style={{ marginTop: 4 }}>
+                  <div className="key-row">
+                    <input
+                      className="field"
+                      type="password"
+                      value={providerInputs[providerId]}
+                      onChange={(event) =>
+                        setProviderInputs((current) => ({ ...current, [providerId]: event.target.value }))
+                      }
+                      placeholder={
+                        providerId === 'cursor'
+                          ? zh ? 'Cookie header 或 session token' : 'Cookie header or session token'
+                          : providerId === 'zai' || providerId === 'zcode'
+                            ? zh ? 'API Key 或 JSON（团队版）' : 'API key or team JSON'
+                            : zh ? 'OAuth access token（可选，通常自动检测）' : 'OAuth access token (optional, usually auto-detected)'
+                      }
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={!providerInputs[providerId].trim() || providerBusy === providerId}
+                      onClick={() => void saveProviderSecret(providerId)}
+                    >
+                      {providerBusy === providerId ? <Spinner size={12} /> : <Check size={12} />}
+                      {zh ? '保存' : 'Save'}
+                    </button>
+                    {configured ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        disabled={providerBusy === providerId}
+                        onClick={() => void clearProviderSecret(providerId)}
+                      >
+                        <RefreshCw size={12} />
+                        {zh ? '清除手动' : 'Clear manual'}
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="hint" style={{ marginTop: 5 }}>
+                    {providerId === 'zai' || providerId === 'zcode'
+                      ? zh
+                        ? '个人 Key 直接粘贴；BigModel 团队版粘贴 JSON（apiKey + organizationId + projectId）。'
+                        : 'Paste a personal key directly; for BigModel team plans paste JSON with apiKey + organizationId + projectId.'
+                      : zh
+                        ? '凭证使用系统加密保存，不会写入日志或渲染进程。'
+                        : 'Credentials are encrypted with the OS keystore and never sent to the renderer.'}
+                  </div>
+                </div>
+              </>
+            )}
           </SectionCard>
         );
       })}
