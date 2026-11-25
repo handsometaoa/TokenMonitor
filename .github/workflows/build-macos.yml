@@ -33,7 +33,8 @@ jobs:
         run: npm run build
 
       - name: Package macOS DMG
-        run: npx electron-builder --mac dmg --publish never
+        # Explicit universal arch — CLI flags override the yml target arch list.
+        run: npx electron-builder --mac dmg universal --publish never
         env:
           # No Apple Developer certificate on CI; skip code signing.
           CSC_IDENTITY_AUTO_DISCOVERY: false
