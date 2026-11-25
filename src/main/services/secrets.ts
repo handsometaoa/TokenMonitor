@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeStorage } from 'electron';
+import { secretEnvelopeSchema } from '../../shared/routerSchemas';
+import { parseJson } from '../../shared/validation';
 import type { Logger } from './logger';
 
 interface SecretFile {
@@ -50,13 +52,20 @@ export class SecretStore {
       return { persisted: false };
     }
 
-    const encrypted = safeStorage.encryptString(key).toString('base64');
-    const payload: SecretFile = { version: 1, data: encrypted };
     const tempPath = `${this.filePath}.tmp`;
-    writeFileSync(tempPath, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 });
-    renameSync(tempPath, this.filePath);
-    this.persisted = true;
-    return { persisted: true };
+    try {
+      const encrypted = safeStorage.encryptString(key).toString('base64');
+      const payload: SecretFile = { version: 1, data: encrypted };
+      writeFileSync(tempPath, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 });
+      renameSync(tempPath, this.filePath);
+      this.persisted = true;
+      return { persisted: true };
+    } catch (error) {
+      this.persisted = false;
+      this.removeFile();
+      this.logger.error('Could not save encrypted credential.', error);
+      return { persisted: false };
+    }
   }
 
   clear(): void {
@@ -73,9 +82,9 @@ export class SecretStore {
     }
 
     try {
-      const payload = JSON.parse(readFileSync(this.filePath, 'utf8')) as SecretFile;
-      if (payload.version !== 1 || typeof payload.data !== 'string') return;
-      this.memoryKey = safeStorage.decryptString(Buffer.from(payload.data, 'base64'));
+      const payload = secretEnvelopeSchema.safeParse(parseJson(readFileSync(this.filePath, 'utf8')));
+      if (!payload.success) return;
+      this.memoryKey = safeStorage.decryptString(Buffer.from(payload.data.data, 'base64'));
       this.persisted = true;
     } catch (error) {
       this.logger.error('Could not decrypt stored credential.', error);
@@ -85,10 +94,12 @@ export class SecretStore {
   }
 
   private removeFile(): void {
-    try {
-      if (existsSync(this.filePath)) unlinkSync(this.filePath);
-    } catch {
-      // Ignore.
+    for (const path of [this.filePath, `${this.filePath}.tmp`]) {
+      try {
+        if (existsSync(path)) unlinkSync(path);
+      } catch {
+        // Ignore.
+      }
     }
   }
 }

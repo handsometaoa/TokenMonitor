@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { asRecord, errorMessage } from '../../shared/validation';
 import type { ExtraProviderId, ServiceStatus } from '../../shared/types';
 import type { ExtraFetch } from '../providers/extra/types';
 import type { Logger } from './logger';
@@ -42,12 +43,13 @@ export function normalizeStatusPage(
   json: unknown,
   now = Date.now(),
 ): ServiceStatus {
-  const root = json && typeof json === 'object' ? (json as Record<string, unknown>) : {};
-  const status = root.status && typeof root.status === 'object' ? (root.status as Record<string, unknown>) : {};
+  const root = asRecord(json) ?? {};
+  const status = asRecord(root.status) ?? {};
   const incidents = Array.isArray(root.incidents) ? root.incidents : [];
   const rawComponents = Array.isArray(root.components) ? root.components : [];
   const components = rawComponents
-    .filter((raw): raw is Record<string, unknown> => Boolean(raw) && typeof raw === 'object')
+    .map((raw) => asRecord(raw))
+    .filter((raw): raw is Record<string, unknown> => raw !== null)
     .map((raw) => ({
       name: typeof raw.name === 'string' ? raw.name : 'Component',
       status: typeof raw.status === 'string' ? raw.status : 'unknown',
@@ -59,9 +61,8 @@ export function normalizeStatusPage(
     indicator: indicator(status.indicator),
     description: typeof status.description === 'string' ? status.description : 'Unknown status',
     incidentCount: incidents.filter((raw) => {
-      if (!raw || typeof raw !== 'object') return false;
-      const incident = raw as Record<string, unknown>;
-      return incident.status !== 'resolved' && incident.status !== 'postmortem';
+      const incident = asRecord(raw);
+      return incident !== null && incident.status !== 'resolved' && incident.status !== 'postmortem';
     }).length,
     components,
     updatedAt: now,
@@ -127,7 +128,7 @@ export class ServiceStatusService extends EventEmitter {
             cache: 'no-store',
           });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const json = (await response.json()) as unknown;
+          const json: unknown = await response.json();
           const normalized = normalizeStatusPage(page.providerId, page.providerName, page.url.replace('/api/v2/summary.json', ''), json);
           const relevant = normalized.components.filter((component) => page.components.test(component.name));
           results.push({
@@ -135,7 +136,7 @@ export class ServiceStatusService extends EventEmitter {
             components: (relevant.length ? relevant : normalized.components).slice(0, 6),
           });
         } catch (error) {
-          this.logger.warn(`${page.providerName} status fetch failed: ${error instanceof Error ? error.message : String(error)}`);
+          this.logger.warn(`${page.providerName} status fetch failed: ${errorMessage(error)}`);
           results.push({
             providerId: page.providerId,
             providerName: page.providerName,
@@ -145,7 +146,7 @@ export class ServiceStatusService extends EventEmitter {
             components: [],
             updatedAt: Date.now(),
             url: page.url.replace('/api/v2/summary.json', ''),
-            error: error instanceof Error ? error.message : String(error),
+            error: errorMessage(error),
           });
         }
       }),

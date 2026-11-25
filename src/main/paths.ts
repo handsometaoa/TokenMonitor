@@ -2,13 +2,17 @@ import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 
+function validXdgOverride(value: string | undefined): string | null {
+  return value && value.trim() && isAbsolute(value) ? value : null;
+}
+
 export function openCodeDataDir(): string {
-  const xdgData = process.env.XDG_DATA_HOME;
+  const xdgData = validXdgOverride(process.env.XDG_DATA_HOME);
   return xdgData ? join(xdgData, 'opencode') : join(homedir(), '.local', 'share', 'opencode');
 }
 
 export function openCodeConfigDir(): string {
-  const xdgConfig = process.env.XDG_CONFIG_HOME;
+  const xdgConfig = validXdgOverride(process.env.XDG_CONFIG_HOME);
   return xdgConfig ? join(xdgConfig, 'opencode') : join(homedir(), '.config', 'opencode');
 }
 

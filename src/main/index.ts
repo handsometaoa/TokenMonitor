@@ -31,7 +31,7 @@ if (!gotLock) {
     const showWindow = () => windows?.showMain();
 
     controller = new AppController(baseDir, demo, fetchImpl, showWindow);
-    windows = new WindowManager(() => tray?.getBounds() ?? null, () => controller!.getState());
+    windows = new WindowManager(() => tray?.getBounds() ?? null);
 
     const shutdown = async () => {
       if (cleanedUp) return;

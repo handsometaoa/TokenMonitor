@@ -1,4 +1,5 @@
 import type { ErrorCode, ExtraProviderId, QuotaStatus, ResetCreditsInfo } from '../../../shared/types';
+import { finiteNumber } from '../../../shared/validation';
 
 export interface ExtraProviderCredential {
   providerId: ExtraProviderId;
@@ -41,25 +42,56 @@ export class ExtraProviderError extends Error {
   }
 }
 
-export type ExtraFetch = (input: string, init?: RequestInit) => Promise<Response>;
+export interface FetchRequestInit {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  signal?: AbortSignal;
+  cache?: 'default' | 'no-store' | 'reload' | 'no-cache' | 'force-cache' | 'only-if-cached';
+}
+
+export interface FetchResponseHeaders {
+  get(name: string): string | null;
+  entries(): IterableIterator<[string, string]>;
+}
+
+export interface FetchResponse {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly statusText?: string;
+  readonly headers: FetchResponseHeaders;
+  readonly body?: unknown;
+  text(): Promise<string>;
+  json(): Promise<unknown>;
+}
+
+export type ExtraFetch = (input: string, init?: FetchRequestInit) => Promise<FetchResponse>;
 
 export function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, Number.isFinite(value) ? value : 0));
 }
 
-export function isoReset(value: unknown): string | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return new Date(value > 1e12 ? value : value * 1000).toISOString();
+export function isoFromMilliseconds(value: number): string | null {
+  if (!Number.isFinite(value)) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+export function isoReset(value: unknown, resetInSec?: unknown, now = Date.now()): string | null {
+  const numeric = finiteNumber(value);
+  if (numeric !== null) {
+    return isoFromMilliseconds(numeric > 1e12 ? numeric : numeric * 1000);
   }
-  if (typeof value === 'string' && value.trim()) {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric) && /^\d+(?:\.\d+)?$/.test(value.trim())) {
-      return new Date(numeric > 1e12 ? numeric : numeric * 1000).toISOString();
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (text) {
+    const numericText = Number(text);
+    if (Number.isFinite(numericText) && /^\d+(?:\.\d+)?$/.test(text)) {
+      return isoFromMilliseconds(numericText > 1e12 ? numericText : numericText * 1000);
     }
-    const parsed = Date.parse(value);
-    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+    return isoFromMilliseconds(Date.parse(text));
   }
-  return null;
+  const seconds = finiteNumber(resetInSec);
+  return seconds === null ? null : isoFromMilliseconds(now + seconds * 1000);
 }
 
 export function labelForMinutes(minutes: number): { id: string; label: string } {

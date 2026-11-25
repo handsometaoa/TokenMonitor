@@ -1,10 +1,17 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ProviderSnapshot, QuotaHistoryPoint } from '../../shared/types';
+import { quotaHistoryPointSchema } from '../../shared/routerSchemas';
+import { parseJson } from '../../shared/validation';
 import type { Logger } from './logger';
 
 const MIN_APPEND_MS = 5 * 60 * 1000;
 const RETENTION_DAYS = 90;
+const HISTORY_FILE_NAME = /^\d{4}-(?:0[1-9]|1[0-2])\.jsonl$/;
+
+function isHistoryFileName(name: string): boolean {
+  return HISTORY_FILE_NAME.test(name);
+}
 
 function monthKey(ts: number): string {
   const date = new Date(ts);
@@ -39,7 +46,12 @@ export class QuotaHistory {
   }
 
   append(snapshot: ProviderSnapshot): void {
-    const point = pointFromSnapshot(snapshot);
+    const parsed = quotaHistoryPointSchema.safeParse(pointFromSnapshot(snapshot));
+    if (!parsed.success) {
+      this.logger.error('Could not append quota history: invalid point.');
+      return;
+    }
+    const point = parsed.data;
     const changed =
       !this.lastPoint ||
       point.rolling !== this.lastPoint.rolling ||
@@ -75,8 +87,8 @@ export class QuotaHistory {
         for (const line of lines) {
           if (!line.trim()) continue;
           try {
-            const point = JSON.parse(line) as QuotaHistoryPoint;
-            if (typeof point.ts === 'number' && point.ts >= cutoff) points.push(point);
+            const parsed = quotaHistoryPointSchema.safeParse(parseJson(line));
+            if (parsed.success && parsed.data.ts >= cutoff) points.push(parsed.data);
           } catch {
             // Skip malformed line.
           }
@@ -92,7 +104,7 @@ export class QuotaHistory {
     this.lastPoint = null;
     try {
       for (const file of readdirSync(this.dir)) {
-        if (file.endsWith('.jsonl')) unlinkSync(join(this.dir, file));
+        if (isHistoryFileName(file)) unlinkSync(join(this.dir, file));
       }
     } catch (error) {
       this.logger.error('Could not clear quota history.', error);
@@ -106,8 +118,12 @@ export class QuotaHistory {
         const lines = readFileSync(file, 'utf8').trim().split('\n').reverse();
         for (const line of lines) {
           if (!line.trim()) continue;
-          const point = JSON.parse(line) as QuotaHistoryPoint;
-          if (typeof point.ts === 'number') return point;
+          try {
+            const parsed = quotaHistoryPointSchema.safeParse(parseJson(line));
+            if (parsed.success) return parsed.data;
+          } catch {
+            // Skip malformed line and keep searching older lines/files.
+          }
         }
       } catch {
         // Try older file.
@@ -145,7 +161,7 @@ export class QuotaHistory {
     const cutoffKey = monthKey(cutoff.getTime());
     try {
       for (const file of readdirSync(this.dir)) {
-        if (!file.endsWith('.jsonl')) continue;
+        if (!isHistoryFileName(file)) continue;
         const key = file.slice(0, 7);
         if (key < cutoffKey) unlinkSync(join(this.dir, file));
       }

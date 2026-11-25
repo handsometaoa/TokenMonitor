@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { OpenCodeGoUsageApi, UsageApiError, type FetchLike } from '../src/main/providers/opencodeGo/api';
+import { defined } from './helpers';
 
 function fetchJson(body: unknown, status = 200): FetchLike {
   return async () =>
@@ -22,8 +23,8 @@ describe('OpenCodeGoUsageApi', () => {
     );
     const snapshot = await api.fetchUsage('key');
     expect(snapshot.windows).toHaveLength(3);
-    expect(snapshot.windows[0].usedPercent).toBe(12);
-    expect(snapshot.windows[0].resetsAt).toBe('2026-11-24T02:00:00.000Z');
+    expect(defined(snapshot.windows[0]).usedPercent).toBe(12);
+    expect(defined(snapshot.windows[0]).resetsAt).toBe('2026-11-24T02:00:00.000Z');
   });
 
   it('accepts the legacy usage shape and resetInSec', async () => {

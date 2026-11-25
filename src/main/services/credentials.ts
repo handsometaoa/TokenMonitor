@@ -8,16 +8,11 @@ import type {
   CredentialKind,
   CredentialStatus,
 } from '../../shared/types';
+import { asRecord, nonEmptyString, parseJson } from '../../shared/validation';
 
 export interface ResolvedCredential {
   key: string;
   kind: Exclude<CredentialKind, 'none'>;
-}
-
-interface AuthFileEntry {
-  type?: unknown;
-  key?: unknown;
-  access?: unknown;
 }
 
 const ENV_NAMES = ['OPENCODE_GO_API_KEY', 'OPENCODE_API_KEY'] as const;
@@ -29,8 +24,8 @@ export function maskSecret(secret: string): string {
 }
 
 function extractOpenCodeEntry(raw: unknown): { provider: string; key: string; kind: CredentialKind } | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const record = raw as Record<string, AuthFileEntry>;
+  const record = asRecord(raw);
+  if (!record) return null;
   const keys = Object.keys(record);
   const ordered = [
     ...keys.filter((key) => /^opencode-go$/i.test(key)),
@@ -39,11 +34,11 @@ function extractOpenCodeEntry(raw: unknown): { provider: string; key: string; ki
   ];
 
   for (const provider of ordered) {
-    const entry = record[provider];
-    if (!entry || typeof entry !== 'object') continue;
-    const apiKey = typeof entry.key === 'string' ? entry.key.trim() : '';
+    const entry = asRecord(record[provider]);
+    if (!entry) continue;
+    const apiKey = nonEmptyString(entry.key);
     if (apiKey) return { provider, key: apiKey, kind: 'auth-file' };
-    const access = typeof entry.access === 'string' ? entry.access.trim() : '';
+    const access = nonEmptyString(entry.access);
     if (access) return { provider, key: access, kind: 'auth-file' };
   }
   return null;
@@ -53,7 +48,7 @@ function readAuthFile(): { available: boolean; entry: ReturnType<typeof extractO
   const path = authFilePath();
   if (!existsSync(path)) return { available: false, entry: null };
   try {
-    const raw = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+    const raw = parseJson(readFileSync(path, 'utf8'));
     return { available: true, entry: extractOpenCodeEntry(raw) };
   } catch {
     return { available: true, entry: null };
@@ -62,7 +57,7 @@ function readAuthFile(): { available: boolean; entry: ReturnType<typeof extractO
 
 function readEnvKey(): { key: string; name: string } | null {
   for (const name of ENV_NAMES) {
-    const value = process.env[name]?.trim();
+    const value = nonEmptyString(process.env[name]);
     if (value) return { key: value, name };
   }
   return null;

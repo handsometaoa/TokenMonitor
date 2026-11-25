@@ -9,7 +9,7 @@ const buildDir = join(root, 'build');
 await mkdir(resourcesDir, { recursive: true });
 await mkdir(buildDir, { recursive: true });
 
-function traySvg(color) {
+function traySvg(color: string): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
   <g fill="${color}">
     <rect x="5" y="15" width="6" height="12" rx="2.4"/>
@@ -19,7 +19,7 @@ function traySvg(color) {
 </svg>`;
 }
 
-function appSvg() {
+function appSvg(): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
     <linearGradient id="bg" x1="120" y1="80" x2="920" y2="960" gradientUnits="userSpaceOnUse">
@@ -59,7 +59,7 @@ for (const [name, color] of Object.entries(trayColors)) {
   await sharp(svg).resize(32, 32).png().toFile(join(resourcesDir, `tray-${name}.png`));
   await sharp(svg).resize(64, 64).png().toFile(join(resourcesDir, `tray-${name}@2x.png`));
 
-  const icoPngs = [];
+  const icoPngs: Buffer[] = [];
   for (const size of [16, 24, 32, 48, 64]) {
     icoPngs.push(await sharp(svg).resize(size, size).png().toBuffer());
   }
@@ -70,7 +70,7 @@ for (const [name, color] of Object.entries(trayColors)) {
 const appBuffer = Buffer.from(appSvg());
 await sharp(appBuffer).resize(1024, 1024).png().toFile(join(buildDir, 'icon.png'));
 await sharp(appBuffer).resize(512, 512).png().toFile(join(resourcesDir, 'app.png'));
-const appIcoPngs = [];
+const appIcoPngs: Buffer[] = [];
 for (const size of [16, 24, 32, 48, 64, 128, 256]) {
   appIcoPngs.push(await sharp(appBuffer).resize(size, size).png().toBuffer());
 }

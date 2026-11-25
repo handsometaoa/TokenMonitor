@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RouterRepository } from '../src/main/router/db';
+import { defined } from './helpers';
 
 const dirs: string[] = [];
 
@@ -95,8 +96,8 @@ describe('router usage activity', () => {
 
     const activity = db.getUsageActivity(7);
     expect(activity).toHaveLength(7);
-    expect(activity[0].date).toBe(dayKey(6));
-    expect(activity[6].date).toBe(dayKey(0));
+    expect(defined(activity[0]).date).toBe(dayKey(6));
+    expect(defined(activity[6]).date).toBe(dayKey(0));
 
     const byDate = new Map(activity.map((day) => [day.date, day]));
     expect(byDate.get(dayKey(0))).toEqual({ date: dayKey(0), requestCount: 2, totalTokens: 150 });
@@ -111,8 +112,8 @@ describe('router usage activity', () => {
     expect(db.getUsageActivity(0)).toHaveLength(1);
     const wide = db.getUsageActivity(500);
     expect(wide).toHaveLength(90);
-    expect(wide[0].date).toBe(dayKey(89));
-    expect(wide[89].date).toBe(dayKey(0));
+    expect(defined(wide[0]).date).toBe(dayKey(89));
+    expect(defined(wide[89]).date).toBe(dayKey(0));
     db.close();
   });
 });

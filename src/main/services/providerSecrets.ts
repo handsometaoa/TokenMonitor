@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeStorage } from 'electron';
+import { isRecord, nonEmptyString, parseJson } from '../../shared/validation';
 import type { Logger } from './logger';
 
 type SecretMap = Record<string, string>;
@@ -20,7 +21,9 @@ export class ProviderSecretStore {
   }
 
   get(providerId: string): string | null {
-    return this.secrets[providerId]?.trim() || null;
+    if (!Object.hasOwn(this.secrets, providerId)) return null;
+    const value: unknown = this.secrets[providerId];
+    return nonEmptyString(value);
   }
 
   has(providerId: string): boolean {
@@ -31,17 +34,8 @@ export class ProviderSecretStore {
     const trimmed = secret.trim();
     if (!trimmed) throw new Error('Secret is empty');
     this.secrets = { ...this.secrets, [providerId]: trimmed };
-    if (!safeStorage.isEncryptionAvailable()) {
-      this.persisted = false;
-      return { persisted: false };
-    }
-
-    const payload = safeStorage.encryptString(JSON.stringify(this.secrets)).toString('base64');
-    const temp = `${this.filePath}.tmp`;
-    writeFileSync(temp, payload, { encoding: 'utf8', mode: 0o600 });
-    renameSync(temp, this.filePath);
-    this.persisted = true;
-    return { persisted: true };
+    this.persistIfPossible();
+    return { persisted: this.persisted };
   }
 
   clear(providerId: string): void {
@@ -54,11 +48,7 @@ export class ProviderSecretStore {
   clearAll(): void {
     this.secrets = {};
     this.persisted = false;
-    try {
-      if (existsSync(this.filePath)) unlinkSync(this.filePath);
-    } catch {
-      // Ignore.
-    }
+    this.removeFile();
   }
 
   isPersisted(): boolean {
@@ -67,51 +57,69 @@ export class ProviderSecretStore {
 
   private load(): void {
     if (!existsSync(this.filePath)) return;
-    if (!safeStorage.isEncryptionAvailable()) {
+    if (!this.isEncryptionAvailable()) {
       this.logger.warn('Provider secrets file exists but safeStorage is unavailable.');
       return;
     }
     try {
       const base64 = readFileSync(this.filePath, 'utf8').trim();
       const decrypted = safeStorage.decryptString(Buffer.from(base64, 'base64'));
-      const parsed = JSON.parse(decrypted) as unknown;
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        this.secrets = Object.fromEntries(
-          Object.entries(parsed as Record<string, unknown>)
-            .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
-            .map(([key, value]) => [key, value.trim()])
-            .filter(([, value]) => Boolean(value)),
-        );
+      const parsed: unknown = parseJson(decrypted);
+      if (isRecord(parsed)) {
+        const entries: Array<[string, string]> = [];
+        for (const [key, value] of Object.entries(parsed)) {
+          const secret = nonEmptyString(value);
+          if (secret) entries.push([key, secret]);
+        }
+        this.secrets = Object.fromEntries(entries);
         this.persisted = true;
       }
     } catch (error) {
       this.logger.error('Could not decrypt provider secrets.', error);
       this.secrets = {};
+      this.persisted = false;
+    }
+  }
+
+  private isEncryptionAvailable(): boolean {
+    try {
+      return safeStorage.isEncryptionAvailable();
+    } catch {
+      return false;
     }
   }
 
   private persistIfPossible(): void {
-    if (!safeStorage.isEncryptionAvailable()) {
+    if (!this.isEncryptionAvailable()) {
       this.persisted = false;
+      this.removeFile();
       return;
     }
     if (Object.keys(this.secrets).length === 0) {
-      try {
-        if (existsSync(this.filePath)) unlinkSync(this.filePath);
-      } catch {
-        // Ignore.
-      }
+      this.removeFile();
       this.persisted = false;
       return;
     }
+    const temp = `${this.filePath}.tmp`;
     try {
       const payload = safeStorage.encryptString(JSON.stringify(this.secrets)).toString('base64');
-      const temp = `${this.filePath}.tmp`;
       writeFileSync(temp, payload, { encoding: 'utf8', mode: 0o600 });
       renameSync(temp, this.filePath);
       this.persisted = true;
     } catch (error) {
+      this.persisted = false;
+      this.removeFile();
       this.logger.error('Could not save provider secrets.', error);
+    }
+  }
+
+  private removeFile(): void {
+    for (const path of [this.filePath, `${this.filePath}.tmp`]) {
+      try {
+        if (existsSync(path)) unlinkSync(path);
+      } catch {
+        // Ignore.
+      }
     }
   }
 }

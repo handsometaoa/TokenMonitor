@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { QUOTA_API_URL } from '../../../shared/types';
 import type { ErrorCode, ProviderError, QuotaStatus, QuotaWindowId } from '../../../shared/types';
+import { finiteNumber, stringValue } from '../../../shared/validation';
+import { isoReset, type FetchRequestInit } from '../extra/types';
 
-export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+export type FetchLike = (input: string, init?: FetchRequestInit) => Promise<Response>;
 
 export interface RawUsageWindow {
   id: QuotaWindowId;
@@ -40,45 +42,45 @@ export class UsageApiError extends Error {
   }
 }
 
-const windowPayloadSchema = z
-  .object({
-    status: z.string().nullish(),
-    percent: z.number().nullish(),
-    usagePercent: z.number().nullish(),
-    resetsAt: z.union([z.string(), z.number()]).nullish(),
-    resetInSec: z.number().nullish(),
-  })
-  .nullish();
+const numberPayloadSchema = z.union([z.number(), z.string()]).nullish();
+
+const windowFields = {
+  status: z.string().nullish(),
+  percent: numberPayloadSchema,
+  usagePercent: numberPayloadSchema,
+  used_percent: numberPayloadSchema,
+  resetsAt: z.union([z.string(), z.number()]).nullish(),
+  resets_at: z.union([z.string(), z.number()]).nullish(),
+  resetInSec: numberPayloadSchema,
+};
+
+export const openCodeGoWindowSchema = z.object(windowFields).nullish();
 
 const payloadSchema = z.object({
   usage: z
     .object({
-      rolling: windowPayloadSchema,
-      weekly: windowPayloadSchema,
-      monthly: windowPayloadSchema,
+      rolling: openCodeGoWindowSchema,
+      weekly: openCodeGoWindowSchema,
+      monthly: openCodeGoWindowSchema,
     })
     .nullish(),
-  rollingUsage: windowPayloadSchema,
-  weeklyUsage: windowPayloadSchema,
-  monthlyUsage: windowPayloadSchema,
+  rollingUsage: openCodeGoWindowSchema,
+  weeklyUsage: openCodeGoWindowSchema,
+  monthlyUsage: openCodeGoWindowSchema,
   windows: z
     .array(
       z
         .object({
           window: z.string().nullish(),
           name: z.string().nullish(),
-          status: z.string().nullish(),
-          percent: z.number().nullish(),
-          usagePercent: z.number().nullish(),
-          resetsAt: z.union([z.string(), z.number()]).nullish(),
-          resetInSec: z.number().nullish(),
+          ...windowFields,
         })
         .nullish(),
     )
     .nullish(),
 });
 
-type WindowPayload = z.infer<typeof windowPayloadSchema>;
+type WindowPayload = z.infer<typeof openCodeGoWindowSchema>;
 
 const WINDOW_IDS: QuotaWindowId[] = ['rolling', 'weekly', 'monthly'];
 
@@ -92,34 +94,23 @@ function normalizeStatus(status: string | null | undefined): QuotaStatus {
   return 'unknown';
 }
 
-function parseResetAt(value: string | number | null | undefined, resetInSec: number | null | undefined, now: number): string | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    const ms = value > 1e12 ? value : value * 1000;
-    return new Date(ms).toISOString();
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric) && /^\d+(?:\.\d+)?$/.test(value.trim())) {
-      return new Date(numeric > 1e12 ? numeric : numeric * 1000).toISOString();
-    }
-    const parsed = Date.parse(value);
-    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
-  }
-  if (typeof resetInSec === 'number' && Number.isFinite(resetInSec)) {
-    return new Date(now + resetInSec * 1000).toISOString();
-  }
-  return null;
+function payloadNumber(value: string | number | null | undefined): number | null {
+  const numeric = finiteNumber(value);
+  if (numeric !== null) return numeric;
+  const text = stringValue(value)?.trim();
+  if (!text) return null;
+  return finiteNumber(Number(text));
 }
 
 function normalizeWindow(id: QuotaWindowId, payload: WindowPayload, now: number): RawUsageWindow | null {
   if (!payload) return null;
-  const percent = payload.percent ?? payload.usagePercent;
-  if (typeof percent !== 'number' || !Number.isFinite(percent)) return null;
+  const percent = payloadNumber(payload.percent) ?? payloadNumber(payload.usagePercent) ?? payloadNumber(payload.used_percent);
+  if (percent === null) return null;
   return {
     id,
     usedPercent: Math.min(100, Math.max(0, percent)),
     status: normalizeStatus(payload.status),
-    resetsAt: parseResetAt(payload.resetsAt, payload.resetInSec, now),
+    resetsAt: isoReset(payload.resetsAt ?? payload.resets_at, payload.resetInSec, now),
   };
 }
 
@@ -140,7 +131,7 @@ export class OpenCodeGoUsageApi {
     };
     if (orgId.trim()) headers['x-opencode-org-id'] = orgId.trim();
 
-    let response: Response;
+    let response: Awaited<ReturnType<FetchLike>>;
     try {
       response = await this.fetchImpl(this.baseUrl, {
         method: 'GET',

@@ -1,6 +1,7 @@
 import { app, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import { IPC } from '../shared/api';
+import { routerProtocolSchema, routerProviderKindSchema } from '../shared/routerSchemas';
 import type { AppController } from './appController';
 import type { WindowManager } from './windowManager';
 
@@ -146,21 +147,6 @@ export function registerIpc(
     return controller.clearQuotaHistory();
   });
 
-  const routerProtocolSchema = z.enum(['openai', 'openai-responses', 'anthropic']);
-  const routerProviderKindSchema = z.enum([
-    'custom',
-    'openai',
-    'anthropic',
-    'deepseek',
-    'zai',
-    'opencode',
-    'openrouter',
-    'moonshot',
-    'siliconflow',
-    'groq',
-    'xai',
-    'google',
-  ]);
   const routerProviderInputSchema = z.object({
     id: z.string().max(100).optional(),
     name: z.string().min(1).max(120),

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { asRecord, parseJson } from '../../../shared/validation';
 import { SseParser, sseData } from './sse';
 import {
   type ApiUsage,
@@ -33,8 +34,8 @@ function parseInputContent(value: unknown): Array<{ type: 'text'; text: string }
   if (!Array.isArray(value)) return [];
   const parts: Array<{ type: 'text'; text: string } | { type: 'image'; url: string }> = [];
   for (const raw of value) {
-    if (!raw || typeof raw !== 'object') continue;
-    const part = raw as Record<string, unknown>;
+    const part = asRecord(raw);
+    if (!part) continue;
     if ((part.type === 'input_text' || part.type === 'output_text' || part.type === 'text') && typeof part.text === 'string') {
       parts.push({ type: 'text', text: part.text });
     } else if (part.type === 'input_image') {
@@ -48,8 +49,8 @@ function parseInputContent(value: unknown): Array<{ type: 'text'; text: string }
 function parseTools(value: unknown): ToolDefinition[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((raw) => {
-    if (!raw || typeof raw !== 'object') return [];
-    const tool = raw as Record<string, unknown>;
+    const tool = asRecord(raw);
+    if (!tool) return [];
     if (tool.type !== 'function') {
       throw new ProtocolError(`Unsupported tool type: ${stringValue(tool.type)}`);
     }
@@ -61,8 +62,8 @@ function parseTools(value: unknown): ToolDefinition[] {
 
 function parseToolChoice(value: unknown): Conversation['toolChoice'] {
   if (value === 'auto' || value === 'none' || value === 'required') return value;
-  if (value && typeof value === 'object') {
-    const choice = value as Record<string, unknown>;
+  const choice = asRecord(value);
+  if (choice) {
     const name = stringValue(choice.name);
     if (name) return { name };
   }
@@ -78,8 +79,8 @@ function parseRequest(body: Record<string, unknown>): Conversation {
     if (input) messages.push({ role: 'user', content: [{ type: 'text', text: input }], toolCalls: [] });
   } else if (Array.isArray(input)) {
     for (const raw of input) {
-      if (!raw || typeof raw !== 'object') continue;
-      const item = raw as Record<string, unknown>;
+      const item = asRecord(raw);
+      if (!item) continue;
       const type = stringValue(item.type);
       if (type === 'message' || (!type && item.role)) {
         const role = stringValue(item.role);
@@ -118,9 +119,7 @@ function parseRequest(body: Record<string, unknown>): Conversation {
     }
   }
 
-  const reasoning = body.reasoning && typeof body.reasoning === 'object'
-    ? (body.reasoning as Record<string, unknown>)
-    : {};
+  const reasoning = asRecord(body.reasoning) ?? {};
   return {
     stream: body.stream === true,
     system,
@@ -196,13 +195,9 @@ function buildRequest(conversation: Conversation, model: string): { body: unknow
 }
 
 function usageOf(raw: unknown): ApiUsage {
-  const usage = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
-  const inputDetails = usage.input_tokens_details && typeof usage.input_tokens_details === 'object'
-    ? (usage.input_tokens_details as Record<string, unknown>)
-    : {};
-  const outputDetails = usage.output_tokens_details && typeof usage.output_tokens_details === 'object'
-    ? (usage.output_tokens_details as Record<string, unknown>)
-    : {};
+  const usage = asRecord(raw) ?? {};
+  const inputDetails = asRecord(usage.input_tokens_details) ?? {};
+  const outputDetails = asRecord(usage.output_tokens_details) ?? {};
   const input = numberValue(usage.input_tokens) ?? 0;
   const cached = numberValue(inputDetails.cached_tokens) ?? 0;
   return {
@@ -215,25 +210,25 @@ function usageOf(raw: unknown): ApiUsage {
 }
 
 function decodeResponse(payload: unknown): Completion {
-  const data = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+  const data = asRecord(payload) ?? {};
   const output = Array.isArray(data.output) ? data.output : [];
   const text: string[] = [];
   const reasoning: string[] = [];
   const toolCalls: ToolCall[] = [];
   for (const raw of output) {
-    if (!raw || typeof raw !== 'object') continue;
-    const item = raw as Record<string, unknown>;
+    const item = asRecord(raw);
+    if (!item) continue;
     if (item.type === 'message' && Array.isArray(item.content)) {
       for (const part of item.content) {
-        if (!part || typeof part !== 'object') continue;
-        const block = part as Record<string, unknown>;
+        const block = asRecord(part);
+        if (!block) continue;
         if (block.type === 'output_text' && typeof block.text === 'string') text.push(block.text);
         if (block.type === 'refusal' && typeof block.refusal === 'string') text.push(block.refusal);
       }
     }
     if (item.type === 'reasoning' && Array.isArray(item.summary)) {
       for (const part of item.summary) {
-        if (part && typeof part === 'object') reasoning.push(stringValue((part as Record<string, unknown>).text));
+        reasoning.push(stringValue(asRecord(part)?.text));
       }
     }
     if (item.type === 'function_call') {
@@ -249,9 +244,7 @@ function decodeResponse(payload: unknown): Completion {
   }
   let reason: FinishReason = toolCalls.length > 0 ? 'tool_calls' : 'stop';
   if (data.status === 'incomplete') {
-    const details = data.incomplete_details && typeof data.incomplete_details === 'object'
-      ? (data.incomplete_details as Record<string, unknown>)
-      : {};
+    const details = asRecord(data.incomplete_details) ?? {};
     if (details.reason === 'max_output_tokens') reason = 'length';
   }
   if (data.status === 'failed') reason = 'error';
@@ -269,7 +262,41 @@ function createStreamDecoder(onEvent: (event: StreamEvent) => void) {
   let finished = false;
   let reason: FinishReason = 'stop';
   let usage = emptyUsage();
-  const items = new Map<string, { id: string; name: string; started: boolean }>();
+  const items = new Map<string, { key: string; id: string; name: string; started: boolean }>();
+  const outputIndexes = new Map<number, string>();
+
+  const findTool = (
+    payload: Record<string, unknown>,
+    item: Record<string, unknown> | null = null,
+  ): { key: string; id: string; name: string; started: boolean } | undefined => {
+    const itemId = stringValue(payload.item_id) || stringValue(item?.id);
+    if (itemId) {
+      const direct = items.get(itemId);
+      if (direct) return direct;
+    }
+    const outputIndex = numberValue(payload.output_index);
+    if (outputIndex !== null) {
+      const key = outputIndexes.get(outputIndex);
+      if (key) {
+        const indexed = items.get(key);
+        if (indexed) return indexed;
+      }
+    }
+    const callId = stringValue(payload.call_id) || stringValue(item?.call_id);
+    if (callId) {
+      for (const tool of items.values()) {
+        if (tool.id === callId) return tool;
+      }
+    }
+    return undefined;
+  };
+
+  const removeTool = (tool: { key: string }): void => {
+    items.delete(tool.key);
+    for (const [index, key] of outputIndexes) {
+      if (key === tool.key) outputIndexes.delete(index);
+    }
+  };
 
   const finish = () => {
     if (finished) return;
@@ -283,9 +310,9 @@ function createStreamDecoder(onEvent: (event: StreamEvent) => void) {
   const handle = (message: { event: string | null; data: string }) => {
     let payload: Record<string, unknown>;
     try {
-      const parsed = JSON.parse(message.data) as unknown;
-      if (!parsed || typeof parsed !== 'object') return;
-      payload = parsed as Record<string, unknown>;
+      const record = asRecord(parseJson(message.data));
+      if (!record) return;
+      payload = record;
     } catch {
       return;
     }
@@ -306,30 +333,36 @@ function createStreamDecoder(onEvent: (event: StreamEvent) => void) {
       return;
     }
     if (type === 'response.output_item.added') {
-      const item = payload.item && typeof payload.item === 'object' ? (payload.item as Record<string, unknown>) : {};
-      if (item.type === 'function_call') {
-        const id = stringValue(item.call_id) || stringValue(item.id) || `call_${randomUUID().slice(0, 12)}`;
+      const item = asRecord(payload.item);
+      if (item?.type === 'function_call') {
+        const itemId = stringValue(item.id);
+        const callId = stringValue(item.call_id);
+        const outputIndex = numberValue(payload.output_index);
+        const fallbackId = `call_${randomUUID().slice(0, 12)}`;
+        const key = itemId || callId || (outputIndex !== null ? `output:${outputIndex}` : fallbackId);
+        const id = callId || itemId || fallbackId;
         const name = stringValue(item.name);
         if (name) {
-          items.set(stringValue(item.id), { id, name, started: true });
+          items.set(key, { key, id, name, started: true });
+          if (outputIndex !== null) outputIndexes.set(outputIndex, key);
           onEvent({ type: 'tool_start', id, name });
         }
       }
       return;
     }
     if (type === 'response.function_call_arguments.delta' && typeof payload.delta === 'string') {
-      const item = items.get(stringValue(payload.item_id));
+      const item = findTool(payload);
       if (item) onEvent({ type: 'tool_delta', id: item.id, arguments: payload.delta });
       return;
     }
     if (type === 'response.output_item.done') {
-      const item = payload.item && typeof payload.item === 'object' ? (payload.item as Record<string, unknown>) : {};
-      if (item.type === 'function_call') {
+      const item = asRecord(payload.item);
+      if (item?.type === 'function_call') {
+        const existing = findTool(payload, item);
         const id = stringValue(item.call_id) || stringValue(item.id);
-        const existing = items.get(stringValue(item.id));
         if (existing) {
           onEvent({ type: 'tool_end', id: existing.id });
-          items.delete(stringValue(item.id));
+          removeTool(existing);
         } else if (id) {
           onEvent({ type: 'tool_end', id });
         }
@@ -337,35 +370,25 @@ function createStreamDecoder(onEvent: (event: StreamEvent) => void) {
       return;
     }
     if (type === 'response.completed' || type === 'response.incomplete') {
-      const response = payload.response && typeof payload.response === 'object'
-        ? (payload.response as Record<string, unknown>)
-        : payload;
+      const response = asRecord(payload.response) ?? payload;
       usage = usageOf(response.usage);
       if (type === 'response.incomplete') {
-        const details = response.incomplete_details && typeof response.incomplete_details === 'object'
-          ? (response.incomplete_details as Record<string, unknown>)
-          : {};
+        const details = asRecord(response.incomplete_details) ?? {};
         if (details.reason === 'max_output_tokens') reason = 'length';
       }
       finish();
       return;
     }
     if (type === 'response.failed') {
-      const response = payload.response && typeof payload.response === 'object'
-        ? (payload.response as Record<string, unknown>)
-        : {};
-      const error = response.error && typeof response.error === 'object'
-        ? (response.error as Record<string, unknown>)
-        : {};
+      const response = asRecord(payload.response) ?? {};
+      const error = asRecord(response.error) ?? {};
       onEvent({ type: 'error', message: stringValue(error.message) || 'Upstream response failed' });
       reason = 'error';
       finish();
       return;
     }
     if (type === 'error') {
-      const error = payload.error && typeof payload.error === 'object'
-        ? (payload.error as Record<string, unknown>)
-        : payload;
+      const error = asRecord(payload.error) ?? payload;
       onEvent({ type: 'error', message: stringValue(error.message) || 'Upstream error' });
       reason = 'error';
       finish();

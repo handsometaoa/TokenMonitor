@@ -26,11 +26,6 @@ interface FormState {
   enabled: boolean;
 }
 
-type TestState = {
-  running: boolean;
-  results: Map<string, RouterModelTestResult>;
-};
-
 const testKey = (publicModel: string, providerName: string) => `${publicModel}\u0000${providerName}`;
 
 export function Models({
@@ -49,13 +44,17 @@ export function Models({
   const [renaming, setRenaming] = useState<{ from: string; to: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [test, setTest] = useState<TestState>({ running: false, results: new Map() });
+  const [testRunning, setTestRunning] = useState<Map<string, number>>(new Map());
+  const [testResults, setTestResults] = useState<Map<string, RouterModelTestResult>>(new Map());
+  const [bulkTesting, setBulkTesting] = useState(false);
   const [formModels, setFormModels] = useState<string[]>([]);
   const [formModelsBusy, setFormModelsBusy] = useState(false);
 
+  // The parent only loads active models. While "show archived" is on, keep the
+  // locally fetched full list instead of letting the parent refresh wipe archived rows.
   useEffect(() => {
-    setGroups(initial);
-  }, [initial]);
+    if (!includeArchived) setGroups(initial);
+  }, [initial, includeArchived]);
 
   const reload = async (archived = includeArchived) => {
     setGroups(await window.tokenMonitor.listRouterModels(archived));
@@ -125,21 +124,42 @@ export function Models({
     await reload();
   };
 
+  const markGroupsRunning = (names: string[], delta: 1 | -1) => {
+    setTestRunning((current) => {
+      const next = new Map(current);
+      for (const name of names) {
+        const count = (next.get(name) ?? 0) + delta;
+        if (count > 0) next.set(name, count);
+        else next.delete(name);
+      }
+      return next;
+    });
+  };
+
   const runTest = async (publicName: string | null) => {
     setError(null);
-    setTest({ running: true, results: new Map() });
+    // One-click testing targets every group with a routed channel; single-model
+    // testing only touches its own group, so the two never clear each other's state.
+    const names = publicName
+      ? [publicName]
+      : groups
+          .filter((group) => group.channels.some((channel) => channel.enabled && !channel.archivedAt))
+          .map((group) => group.publicName);
+    if (names.length === 0) return;
+    if (!publicName) setBulkTesting(true);
+    markGroupsRunning(names, 1);
     try {
       const results = await window.tokenMonitor.testRouterModels(publicName);
-      setTest((current) => ({
-        running: false,
-        results: new Map([
-          ...(publicName ? [] : []),
-          ...results.map((result) => [testKey(result.publicModel, result.providerName), result] as const),
-        ]),
-      }));
+      setTestResults((current) => {
+        const next = new Map(current);
+        for (const result of results) next.set(testKey(result.publicModel, result.providerName), result);
+        return next;
+      });
     } catch (reason) {
-      setTest({ running: false, results: new Map() });
       setError(reason instanceof Error ? reason.message : '模型检测失败');
+    } finally {
+      markGroupsRunning(names, -1);
+      if (!publicName) setBulkTesting(false);
     }
   };
 
@@ -200,11 +220,14 @@ export function Models({
             type="button"
             className="router-btn"
             onClick={() => void runTest(null)}
-            disabled={test.running || groups.every((group) => group.enabledCount === 0)}
+            disabled={
+              bulkTesting ||
+              groups.every((group) => !group.channels.some((channel) => channel.enabled && !channel.archivedAt))
+            }
             title="向每个启用的渠道发送一条最小测试请求（max_tokens=1）"
           >
-            <Activity size={15} className={test.running ? 'spin' : ''} />
-            {test.running ? '检测中…' : '一键模型检测'}
+            <Activity size={15} className={bulkTesting ? 'spin' : ''} />
+            {bulkTesting ? '检测中…' : '一键模型检测'}
           </button>
         </div>
       </div>
@@ -230,7 +253,8 @@ export function Models({
           <tbody>
             {visible.map((group) =>
               group.channels.map((channel, index) => {
-                const result = test.results.get(testKey(group.publicName, channel.providerName));
+                const result = testResults.get(testKey(group.publicName, channel.providerName));
+                const running = testRunning.has(group.publicName);
                 return (
                 <tr key={channel.id} className={channel.archivedAt ? 'archived' : ''}>
                   <td>
@@ -254,19 +278,24 @@ export function Models({
                     )}
                   </td>
                   <td>
-                    {test.running ? (
+                    {running ? (
                       <span className="router-cell-sub">检测中…</span>
                     ) : result ? (
-                      result.ok ? (
-                        <RouterBadge tone="good">
-                          通 · {(result.durationMs! / 1000).toFixed(1)}s
-                        </RouterBadge>
-                      ) : (
-                        <span title={result.error ?? ''}>
-                          <RouterBadge tone="danger">失败</RouterBadge>
-                          <div className="router-cell-sub">{result.error?.slice(0, 60)}</div>
-                        </span>
-                      )
+                      <button
+                        type="button"
+                        className="router-test-result"
+                        onClick={() => void runTest(group.publicName)}
+                        title="点击重新检测该模型组"
+                      >
+                        {result.ok ? (
+                          <RouterBadge tone="good">通 · {(result.durationMs! / 1000).toFixed(1)}s</RouterBadge>
+                        ) : (
+                          <>
+                            <RouterBadge tone="danger">失败</RouterBadge>
+                            <span className="router-cell-sub">{result.error?.slice(0, 60)}</span>
+                          </>
+                        )}
+                      </button>
                     ) : channel.enabled && !channel.archivedAt ? (
                       <button
                         type="button"

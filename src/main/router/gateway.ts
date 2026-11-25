@@ -2,15 +2,18 @@ import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { ProxyAgent, fetch as undiciFetch } from 'undici';
 import type { RouterProtocol, RouterServiceConfig } from '../../shared/routerTypes';
+import { asRecord, isRecord, parseJson, stringValue } from '../../shared/validation';
 import type { Logger } from '../services/logger';
 import type { ProviderSecretStore } from '../services/providerSecrets';
+import type { FetchRequestInit, FetchResponse } from '../providers/extra/types';
 import { RouterBalancer, type RouterFailureKind, sessionKeyFrom } from './balancer';
 import type { RouterRepository, RouterRoute } from './db';
 import { adapterFor } from './protocol/registry';
-import type { ApiUsage, ProtocolAdapter, StreamEvent } from './protocol/types';
+import type { ApiUsage, Conversation, ProtocolAdapter, StreamEvent } from './protocol/types';
 import { ProtocolError, emptyUsage, totalTokens } from './protocol/types';
 
-export type RouterFetch = (input: string, init?: RequestInit) => Promise<Response>;
+export type RouterFetch = (input: string, init?: RouterRequestInit) => Promise<Response>;
+export type RouterRequestInit = FetchRequestInit;
 
 interface AttemptTrace {
   provider: string;
@@ -87,6 +90,42 @@ function estimateTokens(text: string): number {
   return cjk + Math.ceil(other / 4);
 }
 
+/** Rough per-category input composition, estimated from the parsed conversation (client side). */
+interface RequestBreakdown {
+  system: number;
+  tools: number;
+  user: number;
+  toolResults: number;
+  assistant: number;
+}
+
+function estimateBreakdown(conversation: Conversation): RequestBreakdown {
+  let system = 0;
+  for (const block of conversation.system) system += estimateTokens(block);
+  let tools = 0;
+  for (const tool of conversation.tools) tools += estimateTokens(JSON.stringify(tool));
+  let user = 0;
+  let toolResults = 0;
+  let assistant = 0;
+  for (const message of conversation.messages) {
+    if (message.role === 'user') {
+      for (const part of message.content) {
+        if (part.type === 'text') user += estimateTokens(part.text);
+        else if (part.type === 'tool_result')
+          toolResults += estimateTokens(
+            typeof part.result.content === 'string' ? part.result.content : JSON.stringify(part.result.content ?? ''),
+          );
+      }
+    } else {
+      for (const part of message.content) {
+        if (part.type === 'text') assistant += estimateTokens(part.text);
+      }
+      for (const call of message.toolCalls) assistant += estimateTokens(`${call.name} ${call.arguments}`);
+    }
+  }
+  return { system, tools, user, toolResults, assistant };
+}
+
 function capture(value: string, limit = MAX_CAPTURE_BYTES): string {
   return value.length > limit ? `${value.slice(0, limit)}\n...[truncated ${value.length - limit} chars]` : value;
 }
@@ -109,17 +148,54 @@ function responseHeaders(headers: Headers): Record<string, string> {
   return result;
 }
 
+interface ResponseBodyReader {
+  read(): Promise<{ done: boolean; value?: Uint8Array }>;
+}
+
+function responseBodyReader(body: unknown): ResponseBodyReader | null {
+  const stream = asRecord(body);
+  if (!stream || typeof stream.getReader !== 'function') return null;
+  const reader: unknown = stream.getReader();
+  const readerRecord = asRecord(reader);
+  const read = readerRecord?.read;
+  if (!readerRecord || typeof read !== 'function') return null;
+  return {
+    async read() {
+      const result: unknown = await read.call(readerRecord);
+      const chunk = asRecord(result);
+      if (!chunk) throw new TypeError('Upstream returned an invalid stream chunk');
+      return {
+        done: chunk.done === true,
+        value: chunk.value instanceof Uint8Array ? chunk.value : undefined,
+      };
+    },
+  };
+}
+
+function translateUndiciResponse(source: FetchResponse): Response {
+  const headers = new Headers(Object.fromEntries(source.headers.entries()));
+  const reader = responseBodyReader(source.body);
+  const body = reader
+    ? new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          const chunk = await reader.read();
+          if (chunk.done) controller.close();
+          else if (chunk.value) controller.enqueue(chunk.value);
+        },
+      })
+    : null;
+  return new Response(body, { status: source.status, statusText: source.statusText, headers });
+}
+
 function upstreamClientMessage(status: number, body: string): string {
   try {
-    const parsed = JSON.parse(body) as unknown;
-    if (parsed && typeof parsed === 'object') {
-      const record = parsed as Record<string, unknown>;
-      if (typeof record.message === 'string' && record.message) return record.message;
-      const error = record.error;
-      if (error && typeof error === 'object') {
-        const nested = (error as Record<string, unknown>).message;
-        if (typeof nested === 'string' && nested) return nested;
-      }
+    const parsed = parseJson(body);
+    const record = asRecord(parsed);
+    if (record) {
+      const message = stringValue(record.message);
+      if (message) return message;
+      const nested = stringValue(asRecord(record.error)?.message);
+      if (nested) return nested;
     }
   } catch {
     // Not JSON; fall through to the raw summary.
@@ -170,7 +246,7 @@ export class RouterGateway {
 
   constructor(
     private readonly repo: RouterRepository,
-    private readonly secrets: ProviderSecretStore,
+    private readonly secrets: Pick<ProviderSecretStore, 'get'>,
     private readonly balancer: RouterBalancer,
     private readonly logger: Logger,
     private readonly fetchImpl: RouterFetch,
@@ -311,11 +387,10 @@ export class RouterGateway {
     const raw = await readBody(req);
     let body: Record<string, unknown>;
     try {
-      const parsed = JSON.parse(raw.toString('utf8')) as unknown;
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new ProtocolError('Request body must be an object');
-      }
-      body = parsed as Record<string, unknown>;
+      const parsed = parseJson(raw.toString('utf8'));
+      const record = asRecord(parsed);
+      if (!record) throw new ProtocolError('Request body must be an object');
+      body = record;
     } catch (error) {
       const message = error instanceof ProtocolError ? error.message : 'Invalid JSON body';
       this.logLocal(req, path, 400, message, raw.toString('utf8'));
@@ -348,6 +423,7 @@ export class RouterGateway {
       sendJson(res, 400, entryAdapter.encodeError(message, 'invalid_request'));
       return;
     }
+    const breakdown = estimateBreakdown(conversation);
 
     const sessionKey = sessionKeyFrom(req.headers, body);
     const balance = this.repo.getBalanceConfig();
@@ -460,6 +536,7 @@ export class RouterGateway {
           attempts,
           sessionKey,
           firstByteAt - startedAt,
+          breakdown,
         );
         if (result.committed) return;
         lastError = result.error;
@@ -469,11 +546,11 @@ export class RouterGateway {
       const responseText = await upstream.text();
       let parsed: unknown = null;
       try {
-        parsed = responseText ? JSON.parse(responseText) : null;
+        parsed = responseText ? parseJson(responseText) : null;
       } catch {
         parsed = null;
       }
-      if (!sameProtocol && (!parsed || typeof parsed !== 'object')) {
+      if (!sameProtocol && !isRecord(parsed)) {
         const message = `Upstream ${route.providerName} returned an invalid JSON response`;
         this.balancer.recordFailure(route.providerId, 'server', message);
         this.finishAttempt(
@@ -582,6 +659,7 @@ export class RouterGateway {
         status: upstream.status,
         stream: false,
         ttftMs: Date.now() - startedAt,
+        breakdown,
         promptTokens: usage.inputTokens,
         completionTokens: usage.outputTokens,
         reasoningTokens: usage.reasoningTokens,
@@ -617,6 +695,7 @@ export class RouterGateway {
     attempts: AttemptTrace[],
     sessionKey: string | null,
     ttftMs: number | null,
+    breakdown: RequestBreakdown | null,
   ): Promise<{ committed: boolean; error: string }> {
     const reader = upstream.body?.getReader();
     if (!reader) return { committed: false, error: 'Upstream returned no stream body' };
@@ -717,6 +796,7 @@ export class RouterGateway {
           status: 499,
           stream: true,
           ttftMs,
+          breakdown,
           promptTokens: 0,
           completionTokens: 0,
           reasoningTokens: 0,
@@ -742,6 +822,7 @@ export class RouterGateway {
         status: upstream.status,
         stream: true,
         ttftMs,
+        breakdown,
         promptTokens: usage.inputTokens,
         completionTokens: usage.outputTokens,
         reasoningTokens: usage.reasoningTokens,
@@ -769,6 +850,7 @@ export class RouterGateway {
         status: clientClosed ? 499 : 502,
         stream: true,
         ttftMs,
+        breakdown,
         promptTokens: usage.inputTokens,
         completionTokens: usage.outputTokens,
         reasoningTokens: 0,
@@ -928,14 +1010,13 @@ export class RouterGateway {
     return value === null ? null : capture(value);
   }
 
-  private async fetchUpstream(url: string, init: RequestInit): Promise<Response> {
+  private async fetchUpstream(url: string, init: RouterRequestInit): Promise<Response> {
     const proxyUrl = this.getConfig().proxyUrl.trim();
     if (!proxyUrl) return this.fetchImpl(url, init);
     if (!this.proxy || this.proxy.url !== proxyUrl) {
       if (this.proxy) await this.proxy.agent.close().catch(() => undefined);
       this.proxy = { url: proxyUrl, agent: new ProxyAgent(proxyUrl) };
     }
-    const requestInit = { ...init, dispatcher: this.proxy.agent } as Parameters<typeof undiciFetch>[1];
-    return (await undiciFetch(url, requestInit)) as unknown as Response;
+    return translateUndiciResponse(await undiciFetch(url, { ...init, dispatcher: this.proxy.agent }));
   }
 }

@@ -8,6 +8,8 @@ import type {
   RouterQuotaStrategyInfo,
 } from '../../../../shared/routerTypes';
 import { RouterBadge, RouterModal, Field } from '../components';
+import { isRecord, parseJson } from '../../../../shared/validation';
+import { isRouterProviderKind, isRouterProtocol } from '../../../../shared/routerSchemas';
 
 const PROTOCOLS: Array<{ value: RouterProtocol; label: string }> = [
   { value: 'openai', label: 'OpenAI Chat (/chat/completions)' },
@@ -88,9 +90,11 @@ export function Providers({
   const [fetchingModelProvider, setFetchingModelProvider] = useState<string | null>(null);
   const [fetchedModels, setFetchedModels] = useState<{ providerName: string; models: string[] } | null>(null);
 
+  // The parent only loads active providers. While "show archived" is on, keep the
+  // locally fetched full list instead of letting the parent refresh wipe archived rows.
   useEffect(() => {
-    setProviders(initial);
-  }, [initial]);
+    if (!includeArchived) setProviders(initial);
+  }, [initial, includeArchived]);
 
   const reload = async (archived = includeArchived) => {
     setProviders(await window.tokenMonitor.listRouterProviders(archived));
@@ -104,12 +108,12 @@ export function Providers({
     try {
       let strategyConfig: Record<string, string> = {};
       if (editing.strategyConfig.trim()) {
-        const parsed = JSON.parse(editing.strategyConfig) as unknown;
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        const parsed = parseJson(editing.strategyConfig);
+        if (!isRecord(parsed)) {
           throw new Error('策略附加配置必须是 JSON 对象');
         }
         strategyConfig = Object.fromEntries(
-          Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [key, String(value)]),
+          Object.entries(parsed).map(([key, value]) => [key, String(value)]),
         );
       }
       const input: RouterProviderInput = {
@@ -315,14 +319,28 @@ export function Providers({
               <input className="router-input" value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} />
             </Field>
             <Field label="类型">
-              <select className="router-select" value={editing.kind} onChange={(event) => setEditing({ ...editing, kind: event.target.value as RouterProviderKind })}>
+              <select
+                className="router-select"
+                value={editing.kind}
+                onChange={(event) => {
+                  const kind = event.target.value;
+                  if (isRouterProviderKind(kind)) setEditing({ ...editing, kind });
+                }}
+              >
                 {KINDS.map((item) => (
                   <option key={item.value} value={item.value}>{item.label}</option>
                 ))}
               </select>
             </Field>
             <Field label="协议">
-              <select className="router-select" value={editing.protocol} onChange={(event) => setEditing({ ...editing, protocol: event.target.value as RouterProtocol })}>
+              <select
+                className="router-select"
+                value={editing.protocol}
+                onChange={(event) => {
+                  const protocol = event.target.value;
+                  if (isRouterProtocol(protocol)) setEditing({ ...editing, protocol });
+                }}
+              >
                 {PROTOCOLS.map((item) => (
                   <option key={item.value} value={item.value}>{item.label}</option>
                 ))}

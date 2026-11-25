@@ -4,6 +4,7 @@ import { fetchClaudeSnapshot } from '../src/main/providers/extra/claude';
 import { fetchCursorSnapshot } from '../src/main/providers/extra/cursor';
 import { fetchZaiSnapshot } from '../src/main/providers/extra/zai';
 import type { ExtraFetch, ExtraProviderCredential } from '../src/main/providers/extra/types';
+import { defined } from './helpers';
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -35,7 +36,7 @@ describe('extra provider adapters', () => {
     expect(snapshot.providerId).toBe('codex');
     expect(snapshot.planLabel).toBe('Plus');
     expect(snapshot.windows.map((window) => window.id)).toEqual(['session', 'weekly']);
-    expect(snapshot.windows[0].usedPercent).toBe(32);
+    expect(defined(snapshot.windows[0]).usedPercent).toBe(32);
   });
 
   it('attaches Codex limit reset credit inventory', async () => {
@@ -87,9 +88,9 @@ describe('extra provider adapters', () => {
       }),
     );
     expect(snapshot.planLabel).toBe('Cursor pro');
-    expect(snapshot.windows[0].usedPercent).toBe(47);
-    expect(snapshot.windows[1].id).toBe('on-demand');
-    expect(snapshot.windows[1].usedPercent).toBe(12);
+    expect(defined(snapshot.windows[0]).usedPercent).toBe(47);
+    expect(defined(snapshot.windows[1]).id).toBe('on-demand');
+    expect(defined(snapshot.windows[1]).usedPercent).toBe(12);
   });
 
   it('maps Z.AI coding plan limits', async () => {
@@ -108,9 +109,9 @@ describe('extra provider adapters', () => {
       }),
     );
     expect(snapshot.planLabel).toBe('GLM Coding Plan');
-    expect(snapshot.windows[0].id).toBe('session');
-    expect(snapshot.windows[0].windowMs).toBe(5 * 60 * 60 * 1000);
-    expect(snapshot.windows[1].id).toBe('weekly');
+    expect(defined(snapshot.windows[0]).id).toBe('session');
+    expect(defined(snapshot.windows[0]).windowMs).toBe(5 * 60 * 60 * 1000);
+    expect(defined(snapshot.windows[1]).id).toBe('weekly');
   });
 
   it('marks ZCode as its own provider when using the BigModel quota', async () => {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import { parseJson } from '../../../shared/validation';
 
 self.MonacoEnvironment = {
   getWorker() {
@@ -38,7 +39,7 @@ function currentTheme(): 'vs' | 'vs-dark' {
 function displayText(value: string, language: 'json' | 'plaintext'): string {
   if (language !== 'json') return value;
   try {
-    return JSON.stringify(JSON.parse(value), null, 2);
+    return JSON.stringify(parseJson(value), null, 2);
   } catch {
     return value;
   }

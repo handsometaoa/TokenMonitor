@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, Search } from 'lucide-react';
 import type { RouterLogEntry, RouterLogPage } from '../../../../shared/routerTypes';
+import { parseJson } from '../../../../shared/validation';
 import { RouterBadge, RouterModal, formatRouterDuration, formatRouterTime, statusTone } from '../components';
 import { CodeViewer } from '../CodeViewer';
 
@@ -9,7 +10,7 @@ function bodyLanguage(value: string | null): 'json' | 'plaintext' {
   const trimmed = value.trim();
   if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return 'plaintext';
   try {
-    JSON.parse(trimmed);
+    parseJson(trimmed);
     return 'json';
   } catch {
     return 'plaintext';
@@ -68,6 +69,8 @@ export function Logs({ onError }: { onError: (message: string) => void }) {
     setSelected(full ?? entry);
   };
 
+  const selectedCacheHit = selected ? cacheHitPercent(selected) : null;
+
   return (
     <div className="router-page">
       <div className="router-toolbar">
@@ -119,8 +122,10 @@ export function Logs({ onError }: { onError: (message: string) => void }) {
             </tr>
           </thead>
           <tbody>
-            {page.items.map((entry) => (
-              <tr key={entry.id} onClick={() => void detail(entry)} className="clickable">
+            {page.items.map((entry) => {
+              const cacheHit = cacheHitPercent(entry);
+              return (
+                <tr key={entry.id} onClick={() => void detail(entry)} className="clickable">
                 <td className="mono">{formatRouterTime(entry.startedAt)}</td>
                 <td>
                   <strong className="mono">{entry.publicModel}</strong>
@@ -136,14 +141,13 @@ export function Logs({ onError }: { onError: (message: string) => void }) {
                 <td className="mono">{formatRouterDuration(entry.durationMs)}</td>
                 <td className="mono">{contextTokens(entry).toLocaleString()}</td>
                 <td className="mono">
-                  {cacheHitPercent(entry) === null
-                    ? '—'
-                    : `${cacheHitPercent(entry)!.toFixed(0)}%`}
+                  {cacheHit === null ? '—' : `${cacheHit.toFixed(0)}%`}
                 </td>
                 <td className="mono">{entry.totalTokens.toLocaleString()}</td>
                 <td className="mono">{entry.client ?? '—'}</td>
-              </tr>
-            ))}
+                </tr>
+              );
+            })}
             {page.items.length === 0 ? (
               <tr>
                 <td colSpan={9}>
@@ -205,7 +209,7 @@ export function Logs({ onError }: { onError: (message: string) => void }) {
             <div>
               <span>缓存命中</span>
               <strong>
-                {cacheHitPercent(selected) === null ? '—' : `${cacheHitPercent(selected)!.toFixed(1)}%`}
+                {selectedCacheHit === null ? '—' : `${selectedCacheHit.toFixed(1)}%`}
               </strong>
             </div>
             <div>

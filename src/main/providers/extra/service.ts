@@ -7,6 +7,7 @@ import type {
 } from '../../../shared/types';
 import { EXTRA_PROVIDER_IDS, agentQuotaKey } from '../../../shared/types';
 import { EXTRA_PROVIDER_NAMES } from '../../../shared/providers';
+import { errorMessage } from '../../../shared/validation';
 import { computePace } from '../../services/pace';
 import type { Logger } from '../../services/logger';
 import type { ProviderSecretStore } from '../../services/providerSecrets';
@@ -180,7 +181,7 @@ function toProviderError(providerName: string, error: unknown): ProviderError {
   }
   return {
     code: 'unknown',
-    message: `${providerName}: ${error instanceof Error ? error.message : '刷新失败。'}`,
+    message: `${providerName}: ${errorMessage(error)}`,
     retryable: true,
   };
 }
@@ -227,11 +228,11 @@ export class ExtraProviderService extends EventEmitter {
   }
 
   getStates(): ExtraProviderState[] {
-    return EXTRA_PROVIDER_IDS.filter((id) => this.agentEnabled(id)).map((id) => structuredClone(this.states.get(id)!));
+    return EXTRA_PROVIDER_IDS.filter((id) => this.agentEnabled(id)).map((id) => structuredClone(this.requireState(id)));
   }
 
   getState(providerId: ExtraProviderId): ExtraProviderState {
-    return structuredClone(this.states.get(providerId)!);
+    return structuredClone(this.requireState(providerId));
   }
 
   async refresh(manual = false): Promise<void> {
@@ -254,6 +255,12 @@ export class ExtraProviderService extends EventEmitter {
     this.secrets.clear(providerId);
     await this.refreshProvider(providerId);
     this.emit('changed');
+  }
+
+  private requireState(providerId: ExtraProviderId): ExtraProviderState {
+    const state = this.states.get(providerId);
+    if (!state) throw new Error(`Unknown extra provider: ${providerId}`);
+    return state;
   }
 
   private agentEnabled(providerId: ExtraProviderId): boolean {
@@ -288,7 +295,7 @@ export class ExtraProviderService extends EventEmitter {
       if (emit) this.emit('changed');
       return;
     }
-    const state = this.states.get(providerId)!;
+    const state = this.requireState(providerId);
     const credential = resolveExtraCredential(providerId, this.secrets);
     if (!credential) {
       const meta = rawMeta(providerId);

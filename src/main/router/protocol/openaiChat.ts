@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { asRecord, parseJson } from '../../../shared/validation';
 import { SseParser, sseData } from './sse';
 import {
   type ApiUsage,
@@ -30,13 +31,13 @@ function parseContent(value: unknown): Array<{ type: 'text'; text: string } | { 
   if (!Array.isArray(value)) return [];
   const parts: Array<{ type: 'text'; text: string } | { type: 'image'; url: string }> = [];
   for (const item of value) {
-    if (!item || typeof item !== 'object') continue;
-    const part = item as Record<string, unknown>;
+    const part = asRecord(item);
+    if (!part) continue;
     if (part.type === 'text' && typeof part.text === 'string') parts.push({ type: 'text', text: part.text });
     if (part.type === 'input_text' && typeof part.text === 'string') parts.push({ type: 'text', text: part.text });
     if (part.type === 'image_url') {
       const image = part.image_url;
-      const url = typeof image === 'string' ? image : image && typeof image === 'object' ? stringValue((image as Record<string, unknown>).url) : '';
+      const url = typeof image === 'string' ? image : stringValue(asRecord(image)?.url);
       if (url) parts.push({ type: 'image', url });
     }
   }
@@ -46,25 +47,22 @@ function parseContent(value: unknown): Array<{ type: 'text'; text: string } | { 
 function parseTools(value: unknown): ToolDefinition[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
-    if (!item || typeof item !== 'object') return [];
-    const tool = item as Record<string, unknown>;
-    const fn = tool.function;
-    if (!fn || typeof fn !== 'object') return [];
-    const record = fn as Record<string, unknown>;
-    const name = stringValue(record.name);
+    const tool = asRecord(item);
+    if (!tool) return [];
+    const fn = asRecord(tool.function);
+    if (!fn) return [];
+    const name = stringValue(fn.name);
     if (!name) return [];
-    return [{ name, description: stringValue(record.description), parameters: record.parameters ?? { type: 'object', properties: {} } }];
+    return [{ name, description: stringValue(fn.description), parameters: fn.parameters ?? { type: 'object', properties: {} } }];
   });
 }
 
 function parseToolChoice(value: unknown): Conversation['toolChoice'] {
   if (value === 'auto' || value === 'none' || value === 'required') return value;
-  if (value && typeof value === 'object') {
-    const fn = (value as Record<string, unknown>).function;
-    if (fn && typeof fn === 'object') {
-      const name = stringValue((fn as Record<string, unknown>).name);
-      if (name) return { name };
-    }
+  const fn = asRecord(asRecord(value)?.function);
+  if (fn) {
+    const name = stringValue(fn.name);
+    if (name) return { name };
   }
   return null;
 }
@@ -76,8 +74,8 @@ function parseRequest(body: Record<string, unknown>): Conversation {
   const toolNames = new Map<string, string>();
 
   for (const raw of body.messages) {
-    if (!raw || typeof raw !== 'object') continue;
-    const message = raw as Record<string, unknown>;
+    const message = asRecord(raw);
+    if (!message) continue;
     const role = stringValue(message.role);
     if (role === 'system' || role === 'developer') {
       const text = typeof message.content === 'string'
@@ -96,9 +94,9 @@ function parseRequest(body: Record<string, unknown>): Conversation {
       const toolCalls: ToolCall[] = [];
       if (Array.isArray(message.tool_calls)) {
         for (const rawCall of message.tool_calls) {
-          if (!rawCall || typeof rawCall !== 'object') continue;
-          const call = rawCall as Record<string, unknown>;
-          const fn = call.function && typeof call.function === 'object' ? (call.function as Record<string, unknown>) : {};
+          const call = asRecord(rawCall);
+          if (!call) continue;
+          const fn = asRecord(call.function) ?? {};
           const id = stringValue(call.id) || `call_${randomUUID().slice(0, 12)}`;
           const name = stringValue(fn.name);
           if (!name) continue;
@@ -155,7 +153,7 @@ function buildRequest(conversation: Conversation, model: string): { body: unknow
       if (content.length > 0) {
         messages.push({
           role: 'user',
-          content: content.length === 1 && textParts.length === 1 && imageParts.length === 0 ? textParts[0].text : content,
+          content: content.length === 1 && textParts.length === 1 && imageParts.length === 0 ? textParts[0]?.text ?? content : content,
         });
       }
     } else {
@@ -201,36 +199,32 @@ function buildRequest(conversation: Conversation, model: string): { body: unknow
 }
 
 function decodeResponse(payload: unknown): Completion {
-  const data = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+  const data = asRecord(payload) ?? {};
   const choices = Array.isArray(data.choices) ? data.choices : [];
-  const choice = choices[0] && typeof choices[0] === 'object' ? (choices[0] as Record<string, unknown>) : {};
-  const message = choice.message && typeof choice.message === 'object' ? (choice.message as Record<string, unknown>) : {};
+  const choice = asRecord(choices[0]) ?? {};
+  const message = asRecord(choice.message) ?? {};
   const content = typeof message.content === 'string'
     ? message.content
     : Array.isArray(message.content)
-      ? message.content.map((part) => (part && typeof part === 'object' ? stringValue((part as Record<string, unknown>).text) : '')).join('')
+      ? message.content.map((part) => stringValue(asRecord(part)?.text)).join('')
       : '';
   const reasoning = stringValue(message.reasoning_content) || stringValue(message.reasoning);
   const toolCalls: ToolCall[] = Array.isArray(message.tool_calls)
     ? message.tool_calls.flatMap((raw) => {
-        if (!raw || typeof raw !== 'object') return [];
-        const call = raw as Record<string, unknown>;
-        const fn = call.function && typeof call.function === 'object' ? (call.function as Record<string, unknown>) : {};
+        const call = asRecord(raw);
+        if (!call) return [];
+        const fn = asRecord(call.function) ?? {};
         const name = stringValue(fn.name);
         if (!name) return [];
         return [{ id: stringValue(call.id) || `call_${randomUUID().slice(0, 12)}`, name, arguments: parseArguments(fn.arguments) }];
       })
     : [];
-  const usageRaw = data.usage && typeof data.usage === 'object' ? (data.usage as Record<string, unknown>) : {};
+  const usageRaw = asRecord(data.usage) ?? {};
   const prompt = numberValue(usageRaw.prompt_tokens) ?? 0;
-  const promptDetails = usageRaw.prompt_tokens_details && typeof usageRaw.prompt_tokens_details === 'object'
-    ? (usageRaw.prompt_tokens_details as Record<string, unknown>)
-    : {};
+  const promptDetails = asRecord(usageRaw.prompt_tokens_details) ?? {};
   const cached = numberValue(promptDetails.cached_tokens) ?? 0;
   const completion = numberValue(usageRaw.completion_tokens) ?? 0;
-  const completionDetails = usageRaw.completion_tokens_details && typeof usageRaw.completion_tokens_details === 'object'
-    ? (usageRaw.completion_tokens_details as Record<string, unknown>)
-    : {};
+  const completionDetails = asRecord(usageRaw.completion_tokens_details) ?? {};
   const reasoningTokens = numberValue(completionDetails.reasoning_tokens) ?? 0;
   const usage: ApiUsage = {
     inputTokens: Math.max(0, prompt - cached),
@@ -282,28 +276,24 @@ function createStreamDecoder(onEvent: (event: StreamEvent) => void) {
     }
     let payload: unknown;
     try {
-      payload = JSON.parse(data);
+      payload = parseJson(data);
     } catch {
       return;
     }
-    const chunk = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+    const chunk = asRecord(payload) ?? {};
     if (chunk.error) {
-      const error = chunk.error as Record<string, unknown>;
+      const error = asRecord(chunk.error) ?? {};
       onEvent({ type: 'error', message: stringValue(error.message) || 'Upstream error' });
       reason = 'error';
       finish();
       return;
     }
-    if (chunk.usage && typeof chunk.usage === 'object') {
-      const usageRaw = chunk.usage as Record<string, unknown>;
+    if (chunk.usage) {
+      const usageRaw = asRecord(chunk.usage) ?? {};
       const prompt = numberValue(usageRaw.prompt_tokens) ?? 0;
-      const details = usageRaw.prompt_tokens_details && typeof usageRaw.prompt_tokens_details === 'object'
-        ? (usageRaw.prompt_tokens_details as Record<string, unknown>)
-        : {};
+      const details = asRecord(usageRaw.prompt_tokens_details) ?? {};
       const cached = numberValue(details.cached_tokens) ?? 0;
-      const completionDetails = usageRaw.completion_tokens_details && typeof usageRaw.completion_tokens_details === 'object'
-        ? (usageRaw.completion_tokens_details as Record<string, unknown>)
-        : {};
+      const completionDetails = asRecord(usageRaw.completion_tokens_details) ?? {};
       usage = {
         inputTokens: Math.max(0, prompt - cached),
         outputTokens: numberValue(usageRaw.completion_tokens) ?? usage.outputTokens,
@@ -313,27 +303,29 @@ function createStreamDecoder(onEvent: (event: StreamEvent) => void) {
       };
     }
     const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
-    const choice = choices[0] && typeof choices[0] === 'object' ? (choices[0] as Record<string, unknown>) : null;
+    const choice = asRecord(choices[0]);
     if (!choice) return;
-    const delta = choice.delta && typeof choice.delta === 'object' ? (choice.delta as Record<string, unknown>) : {};
+    const delta = asRecord(choice.delta) ?? {};
     const content = stringValue(delta.content);
     if (content) onEvent({ type: 'text', text: content });
     const reasoning = stringValue(delta.reasoning_content) || stringValue(delta.reasoning);
     if (reasoning) onEvent({ type: 'reasoning', text: reasoning });
     if (Array.isArray(delta.tool_calls)) {
       for (const raw of delta.tool_calls) {
-        if (!raw || typeof raw !== 'object') continue;
-        const call = raw as Record<string, unknown>;
+        const call = asRecord(raw);
+        if (!call) continue;
         const index = numberValue(call.index) ?? 0;
-        const fn = call.function && typeof call.function === 'object' ? (call.function as Record<string, unknown>) : {};
+        const fn = asRecord(call.function) ?? {};
         const existing = tools.get(index) ?? {
           id: stringValue(call.id) || `call_${index}`,
           name: '',
           started: false,
           pending: '',
         };
-        if (call.id) existing.id = stringValue(call.id);
-        if (fn.name) existing.name = stringValue(fn.name);
+        const callId = stringValue(call.id);
+        if (callId) existing.id = callId;
+        const name = stringValue(fn.name);
+        if (name) existing.name = name;
         tools.set(index, existing);
         startTool(index);
         const argumentsDelta = stringValue(fn.arguments);

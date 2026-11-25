@@ -47,7 +47,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Generate SHA256 checksums
-        run: node scripts/checksums.mjs release
+        run: npm run checksums -- release
 
       - name: Upload installers
         uses: actions/upload-artifact@v4

@@ -5,7 +5,7 @@ import type { AppState, Language } from '../../../shared/types';
 import { EXTRA_PROVIDER_NAMES } from '../../../shared/providers';
 import type { RouterLogPage, RouterUsageOverview } from '../../../shared/routerTypes';
 import { LineChart, type LineSeries } from '../components/LineChart';
-import { Spinner } from '../components/ui';
+import { Spinner, Toggle } from '../components/ui';
 import { formatDuration, formatTokens } from '../format';
 
 interface HomeQuota {
@@ -58,6 +58,8 @@ interface HomeQuota {
     notConfigured: '未配置',
     low: '余量偏低',
     startHint: '网关未启动，客户端暂时无法调用。',
+    startGateway: '启动本地网关',
+    stopGateway: '停止本地网关',
     refresh: '刷新',
   },
   en: {
@@ -103,6 +105,8 @@ interface HomeQuota {
     notConfigured: 'Not configured',
     low: 'Quota low',
     startHint: 'The gateway is stopped; clients cannot connect yet.',
+    startGateway: 'Start local gateway',
+    stopGateway: 'Stop local gateway',
     refresh: 'Refresh',
   },
 } as const;
@@ -147,10 +151,12 @@ export function Home({
   state,
   language,
   onOpenQuota,
+  onOpenRouter,
 }: {
   state: AppState;
   language: Language;
   onOpenQuota: () => void;
+  onOpenRouter?: () => void;
 }) {
   const copy = COPY[language];
   const zh = language === 'zh-CN';
@@ -159,6 +165,8 @@ export function Home({
   const [logs, setLogs] = useState<RouterLogPage>({ items: [], total: 0 });
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [gatewayBusy, setGatewayBusy] = useState(false);
+  const [gatewayError, setGatewayError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -320,7 +328,20 @@ export function Home({
   const hasUsage = Boolean(usage && usage.totals.requestCount > 0);
   const hasRouterSetup = router.channelHealth.length > 0 || router.quota.length > 0;
 
-  const openRouter = () => void window.tokenMonitor.openRouterWindow();
+  const openRouter = onOpenRouter ?? (() => void window.tokenMonitor.openRouterWindow());
+  const gatewayEnabled = router.service.config.enabled;
+
+  const toggleGateway = async (enabled: boolean) => {
+    setGatewayBusy(true);
+    setGatewayError(null);
+    try {
+      await window.tokenMonitor.saveRouterServiceConfig({ enabled });
+    } catch (reason) {
+      setGatewayError(reason instanceof Error ? reason.message : zh ? '网关开关失败' : 'Gateway toggle failed');
+    } finally {
+      setGatewayBusy(false);
+    }
+  };
 
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -337,10 +358,18 @@ export function Home({
                 : copy.startHint}
             </div>
           </div>
-          <span className={`status-pill ${running ? 'good' : router.service.state === 'error' ? 'danger' : 'off'}`}>
-            <span className="status-dot" />
-            {running ? copy.running : router.service.state === 'error' ? copy.error : copy.stopped}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto' }}>
+            <span className={`status-pill ${running ? 'good' : router.service.state === 'error' ? 'danger' : 'off'}`}>
+              <span className="status-dot" />
+              {running ? copy.running : router.service.state === 'error' ? copy.error : copy.stopped}
+            </span>
+            <Toggle
+              checked={gatewayEnabled}
+              onChange={(enabled) => void toggleGateway(enabled)}
+              disabled={gatewayBusy}
+              label={gatewayEnabled ? copy.stopGateway : copy.startGateway}
+            />
+          </div>
         </div>
         <div className="home-hero-metrics">
           <div>
@@ -379,6 +408,7 @@ export function Home({
             {loading ? <Spinner size={14} /> : <RefreshCw size={14} />}
           </button>
         </div>
+        {gatewayError ? <div className="home-hero-error">{gatewayError}</div> : null}
       </section>
 
       {cards.quota ? (

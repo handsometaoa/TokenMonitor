@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC, type TokenMonitorApi } from '../shared/api';
+import { APP_NAVIGATE, IPC, type TokenMonitorApi } from '../shared/api';
 import type { AppState } from '../shared/types';
 
 const api: TokenMonitorApi = {
@@ -54,6 +54,11 @@ const api: TokenMonitorApi = {
     const handler = (_event: Electron.IpcRendererEvent, state: AppState) => listener(state);
     ipcRenderer.on(IPC.stateChanged, handler);
     return () => ipcRenderer.removeListener(IPC.stateChanged, handler);
+  },
+  onNavigate: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, target: 'router' | 'settings' | 'panel') => listener(target);
+    ipcRenderer.on(APP_NAVIGATE, handler);
+    return () => ipcRenderer.removeListener(APP_NAVIGATE, handler);
   },
 };
 

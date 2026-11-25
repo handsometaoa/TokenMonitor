@@ -44,6 +44,10 @@ import type {
   RouterUsageRange,
 } from '../shared/routerTypes';
 
+function isExtraProviderId(value: string): value is ExtraProviderId {
+  return EXTRA_PROVIDER_IDS.some((id) => id === value);
+}
+
 export class AppController extends EventEmitter {
   readonly logger: Logger;
   readonly settings: SettingsStore;
@@ -165,18 +169,18 @@ export class AppController extends EventEmitter {
   }
 
   async setProviderSecret(providerId: string, secret: string): Promise<AppState> {
-    if (!EXTRA_PROVIDER_IDS.includes(providerId as ExtraProviderId)) {
+    if (!isExtraProviderId(providerId)) {
       throw new Error('Invalid provider');
     }
-    await this.extraProviders.setManualSecret(providerId as ExtraProviderId, secret);
+    await this.extraProviders.setManualSecret(providerId, secret);
     return this.getState();
   }
 
   async clearProviderSecret(providerId: string): Promise<AppState> {
-    if (!EXTRA_PROVIDER_IDS.includes(providerId as ExtraProviderId)) {
+    if (!isExtraProviderId(providerId)) {
       throw new Error('Invalid provider');
     }
-    await this.extraProviders.clearManualSecret(providerId as ExtraProviderId);
+    await this.extraProviders.clearManualSecret(providerId);
     return this.getState();
   }
 

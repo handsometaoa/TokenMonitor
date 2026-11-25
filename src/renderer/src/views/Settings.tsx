@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
+  ArrowLeft,
   Bell,
   Copy,
   Database,
@@ -53,10 +54,12 @@ export function SettingsPage({
   state,
   t,
   language,
+  onClose,
 }: {
   state: AppState;
   t: Translator;
   language: 'zh-CN' | 'en';
+  onClose?: () => void;
 }) {
   const [section, setSection] = useState<SettingsSection>('general');
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
@@ -148,7 +151,7 @@ export function SettingsPage({
   return (
     <div className="settings-shell">
       <aside className="settings-sidebar">
-        <div className="settings-brand">
+        <div className="settings-brand drag">
           <span className="brand-mark" style={{ width: 28, height: 28 }} aria-hidden="true">
             <svg width="17" height="17" viewBox="0 0 32 32" fill="none">
               <rect x="5" y="17" width="5.5" height="10" rx="2.2" fill="white" opacity="0.82" />
@@ -176,6 +179,12 @@ export function SettingsPage({
           );
         })}
         <div className="settings-sidebar-footer">
+          {onClose ? (
+            <button type="button" className="settings-back-btn" onClick={onClose}>
+              <ArrowLeft size={14} />
+              {language === 'zh-CN' ? '返回路由台' : 'Back to router'}
+            </button>
+          ) : null}
           v{appInfo?.version ?? state.version}
           <br />
           {t('app.official')}
@@ -339,13 +348,6 @@ export function SettingsPage({
                       onChange={(value) => void update({ language: value })}
                     />
                   </div>
-                </div>
-                <div className="switch-row">
-                  <div className="switch-copy">
-                    <strong>{t('settings.hideOnBlur')}</strong>
-                    <span>{t('settings.hideOnBlurHint')}</span>
-                  </div>
-                  <Toggle checked={state.settings.hideOnBlur} onChange={(next) => void update({ hideOnBlur: next })} label={t('settings.hideOnBlur')} />
                 </div>
                 <div className="switch-row">
                   <div className="switch-copy">

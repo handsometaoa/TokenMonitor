@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RouterRepository } from '../src/main/router/db';
+import { defined } from './helpers';
 
 const dirs: string[] = [];
 
@@ -74,7 +75,7 @@ describe('router model groups', () => {
     db.renameModelGroup('old-model', 'new-model');
     expect(db.findRoutes('old-model')).toHaveLength(0);
     expect(db.findRoutes('new-model')).toHaveLength(2);
-    expect(db.listLogs({ limit: 10 }).items[0].publicModel).toBe('new-model');
+    expect(defined(db.listLogs({ limit: 10 }).items[0]).publicModel).toBe('new-model');
     db.close();
   });
 
@@ -104,9 +105,9 @@ describe('router model groups', () => {
     });
     db.saveModel({ providerId: provider.id, publicName: 'grouped', upstreamName: 'one', enabled: true });
     db.setModelGroupEnabled('grouped', false);
-    expect(db.findRoutes('grouped')[0].modelEnabled).toBe(false);
+    expect(defined(db.findRoutes('grouped')[0]).modelEnabled).toBe(false);
     db.setModelGroupEnabled('grouped', true);
-    expect(db.findRoutes('grouped')[0].modelEnabled).toBe(true);
+    expect(defined(db.findRoutes('grouped')[0]).modelEnabled).toBe(true);
     db.close();
   });
 });

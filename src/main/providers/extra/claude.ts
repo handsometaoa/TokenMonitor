@@ -1,24 +1,22 @@
+import { asRecord, errorMessage, finiteNumber } from '../../../shared/validation';
 import type { ExtraProviderCredential, ExtraFetch, RawExtraSnapshot, RawExtraWindow } from './types';
 import { ExtraProviderError, clampPercent, errorForStatus, isoReset } from './types';
 
-interface ClaudeWindow {
-  utilization?: number;
-  resets_at?: string;
-}
-
 function mapWindow(
-  raw: ClaudeWindow | undefined,
+  rawValue: unknown,
   id: string,
   label: string,
   windowMs: number,
 ): RawExtraWindow | null {
-  if (!raw || typeof raw.utilization !== 'number') return null;
-  const used = clampPercent(raw.utilization);
+  const raw = asRecord(rawValue);
+  const utilization = finiteNumber(raw?.utilization);
+  if (!raw || utilization === null) return null;
+  const used = clampPercent(utilization);
   return {
     id,
     label,
     usedPercent: used,
-    resetsAt: raw.resets_at ? isoReset(raw.resets_at) : null,
+    resetsAt: isoReset(raw.resets_at),
     status: used >= 100 ? 'rate-limited' : 'ok',
     windowMs,
   };
@@ -29,7 +27,7 @@ export async function fetchClaudeSnapshot(
   fetchImpl: ExtraFetch,
   now = Date.now(),
 ): Promise<RawExtraSnapshot> {
-  let response: Response;
+  let response: Awaited<ReturnType<ExtraFetch>>;
   try {
     response = await fetchImpl('https://api.anthropic.com/api/oauth/usage?cedar_ember=1', {
       method: 'GET',
@@ -44,7 +42,7 @@ export async function fetchClaudeSnapshot(
       cache: 'no-store',
     });
   } catch (error) {
-    throw new ExtraProviderError('network', error instanceof Error ? error.message : 'Claude 网络请求失败。');
+    throw new ExtraProviderError('network', errorMessage(error) || 'Claude 网络请求失败。');
   }
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
@@ -53,17 +51,19 @@ export async function fetchClaudeSnapshot(
     throw errorForStatus(response.status, 'Claude');
   }
 
-  let json: Record<string, unknown>;
+  let json: unknown;
   try {
-    json = (await response.json()) as Record<string, unknown>;
+    json = await response.json();
   } catch {
     throw new ExtraProviderError('malformed', 'Claude 用量响应无法解析。');
   }
+  const payload = asRecord(json);
+  if (!payload) throw new ExtraProviderError('malformed', 'Claude 用量响应格式无效。');
 
   const windows = [
-    mapWindow(json.five_hour as ClaudeWindow | undefined, 'session', '5-hour', 5 * 60 * 60 * 1000),
-    mapWindow(json.seven_day as ClaudeWindow | undefined, 'weekly', 'Weekly', 7 * 24 * 60 * 60 * 1000),
-    mapWindow(json.seven_day_sonnet as ClaudeWindow | undefined, 'sonnet', 'Sonnet weekly', 7 * 24 * 60 * 60 * 1000),
+    mapWindow(payload.five_hour, 'session', '5-hour', 5 * 60 * 60 * 1000),
+    mapWindow(payload.seven_day, 'weekly', 'Weekly', 7 * 24 * 60 * 60 * 1000),
+    mapWindow(payload.seven_day_sonnet, 'sonnet', 'Sonnet weekly', 7 * 24 * 60 * 60 * 1000),
   ].filter((window): window is RawExtraWindow => Boolean(window));
   if (windows.length === 0) {
     throw new ExtraProviderError('malformed', 'Claude 用量响应缺少额度窗口。');

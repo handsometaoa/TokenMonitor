@@ -5,12 +5,15 @@ import type {
   RouterQuotaWindow,
   RouterProviderKind,
 } from '../../shared/routerTypes';
+import { asRecord, errorMessage, finiteNumber, parseJson, stringValue } from '../../shared/validation';
+import { openCodeGoWindowSchema } from '../providers/opencodeGo/api';
 import { fetchClaudeSnapshot } from '../providers/extra/claude';
 import { fetchCodexSnapshot } from '../providers/extra/codex';
 import { fetchCursorSnapshot } from '../providers/extra/cursor';
 import { fetchZaiSnapshot } from '../providers/extra/zai';
 import type { RawExtraSnapshot } from '../providers/extra/types';
-import type { RouterFetch } from './gateway';
+import { isoFromMilliseconds } from '../providers/extra/types';
+import type { RouterFetch, RouterRequestInit } from './gateway';
 import type { RouterProviderRow } from './db';
 
 export interface RouterQuotaResult {
@@ -33,16 +36,29 @@ export interface RouterQuotaStrategy extends RouterQuotaStrategyInfo {
   fetch(context: RouterQuotaContext): Promise<RouterQuotaResult>;
 }
 
-function record(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+async function readJson(response: Response, provider: string): Promise<unknown> {
+  try {
+    const json: unknown = await response.json();
+    return json;
+  } catch {
+    throw new Error(`${provider} 响应无法解析为 JSON`);
+  }
+}
+
+async function readJsonRecord(response: Response, provider: string): Promise<Record<string, unknown>> {
+  const json = await readJson(response, provider);
+  const record = asRecord(json);
+  if (!record) throw new Error(`${provider} 响应格式无效，应为 JSON 对象`);
+  return record;
 }
 
 function numberValue(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
-  return null;
+  const numeric = finiteNumber(value);
+  if (numeric !== null) return numeric;
+  const text = stringValue(value)?.trim();
+  if (!text) return null;
+  const parsed = Number(text);
+  return finiteNumber(parsed);
 }
 
 function clamp(value: number): number {
@@ -81,24 +97,17 @@ async function fetchOpencode(ctx: RouterQuotaContext): Promise<RouterQuotaResult
   });
   if (response.status === 401 || response.status === 403) throw new Error('OpenCode API Key 无效或已过期');
   if (response.status !== 200) throw new Error(`OpenCode 余量接口 HTTP ${response.status}`);
-  const body = record(await response.json());
-  const usage = record(body?.usage);
+  const body = await readJsonRecord(response, 'OpenCode');
+  const usage = asRecord(body.usage);
   if (!usage) throw new Error('OpenCode 响应缺少 usage');
 
   const windowOf = (raw: unknown, id: string, label: string, minutes: number): RouterQuotaWindow | null => {
-    const item = record(raw);
-    if (!item) return null;
-    const percent =
-      numberValue(item.percent) ??
-      numberValue(item.usagePercent) ??
-      numberValue(item.used_percent) ??
-      0;
-    const reset =
-      typeof item.resetsAt === 'string'
-        ? item.resetsAt
-        : typeof item.resets_at === 'string'
-          ? item.resets_at
-          : null;
+    const parsed = openCodeGoWindowSchema.safeParse(raw);
+    if (!parsed.success || !parsed.data) return null;
+    const item = parsed.data;
+    const percent = numberValue(item.percent) ?? numberValue(item.usagePercent) ?? numberValue(item.used_percent);
+    if (percent === null) return null;
+    const reset = stringValue(item.resetsAt) ?? stringValue(item.resets_at);
     return {
       id,
       label,
@@ -124,15 +133,15 @@ async function fetchDeepseek(ctx: RouterQuotaContext): Promise<RouterQuotaResult
   });
   if (response.status === 401) throw new Error('DeepSeek API Key 无效');
   if (response.status !== 200) throw new Error(`DeepSeek 余额接口 HTTP ${response.status}`);
-  const body = record(await response.json());
-  const infos = Array.isArray(body?.balance_infos) ? body.balance_infos : [];
-  const first = record(infos[0]);
+  const body = await readJsonRecord(response, 'DeepSeek');
+  const infos = Array.isArray(body.balance_infos) ? body.balance_infos : [];
+  const first = asRecord(infos[0]);
   const balance = numberValue(first?.total_balance);
   if (balance === null) throw new Error('DeepSeek 响应缺少 balance_infos[0].total_balance');
   return {
     windows: [],
     balance,
-    currency: typeof first?.currency === 'string' ? first.currency : 'CNY',
+    currency: stringValue(first?.currency) ?? 'CNY',
     details: [{ label: '账户', value: body?.is_available === false ? '不可用' : '可用' }],
   };
 }
@@ -145,8 +154,8 @@ async function fetchOpenrouter(ctx: RouterQuotaContext): Promise<RouterQuotaResu
   });
   if (response.status === 401) throw new Error('OpenRouter API Key 无效');
   if (response.status !== 200) throw new Error(`OpenRouter credits 接口 HTTP ${response.status}`);
-  const body = record(await response.json());
-  const data = record(body?.data);
+  const body = await readJsonRecord(response, 'OpenRouter');
+  const data = asRecord(body.data);
   const total = numberValue(data?.total_credits);
   const used = numberValue(data?.total_usage);
   if (total === null || used === null) throw new Error('OpenRouter 响应缺少 total_credits / total_usage');
@@ -169,8 +178,8 @@ async function fetchMoonshot(ctx: RouterQuotaContext): Promise<RouterQuotaResult
   });
   if (response.status === 401) throw new Error('Moonshot API Key 无效');
   if (response.status !== 200) throw new Error(`Moonshot 余额接口 HTTP ${response.status}`);
-  const body = record(await response.json());
-  const data = record(body?.data);
+  const body = await readJsonRecord(response, 'Moonshot');
+  const data = asRecord(body.data);
   const available = numberValue(data?.available_balance);
   if (available === null) throw new Error('Moonshot 响应缺少 data.available_balance');
   const details: Array<{ label: string; value: string }> = [];
@@ -181,7 +190,7 @@ async function fetchMoonshot(ctx: RouterQuotaContext): Promise<RouterQuotaResult
   return {
     windows: [],
     balance: available,
-    currency: typeof data?.currency === 'string' ? data.currency : 'CNY',
+    currency: stringValue(data?.currency) ?? 'CNY',
     details,
   };
 }
@@ -194,8 +203,8 @@ async function fetchSiliconflow(ctx: RouterQuotaContext): Promise<RouterQuotaRes
   });
   if (response.status === 401) throw new Error('SiliconFlow API Key 无效');
   if (response.status !== 200) throw new Error(`SiliconFlow 余额接口 HTTP ${response.status}`);
-  const body = record(await response.json());
-  const data = record(body?.data);
+  const body = await readJsonRecord(response, 'SiliconFlow');
+  const data = asRecord(body.data);
   const balance =
     numberValue(data?.totalBalance) ??
     numberValue(data?.balance) ??
@@ -228,8 +237,8 @@ async function fetchAiand(ctx: RouterQuotaContext): Promise<RouterQuotaResult> {
   });
   if (response.status === 401) throw new Error('AiAnd API Key 无效');
   if (response.status !== 200) throw new Error(`AiAnd HTTP ${response.status}`);
-  const body = record(await response.json());
-  const data = record(body?.data) ?? body;
+  const body = await readJsonRecord(response, 'AiAnd');
+  const data = asRecord(body.data) ?? body;
   const used = pickNumber(data, ['used', 'credits_used', 'total_used', 'usage']);
   const limit = pickNumber(data, ['limit', 'credits_limit', 'quota', 'total_limit']);
   if (used === null && limit === null) throw new Error('AiAnd 响应缺少用量字段');
@@ -258,8 +267,8 @@ async function fetchChutes(ctx: RouterQuotaContext): Promise<RouterQuotaResult> 
   });
   if (response.status === 401 || response.status === 403) throw new Error('Chutes API Key 无效');
   if (response.status !== 200) throw new Error(`Chutes HTTP ${response.status}`);
-  const body = record(await response.json());
-  const data = record(body?.data) ?? body;
+  const body = await readJsonRecord(response, 'Chutes');
+  const data = asRecord(body.data) ?? body;
   const usedPercent = pickNumber(data, ['percent_used', 'usagePercent', 'percentUsed']);
   const remainingPercent = pickNumber(data, ['percent_remaining', 'percentRemaining']);
   const percent = usedPercent ?? (remainingPercent !== null ? 100 - remainingPercent : null);
@@ -297,13 +306,13 @@ async function fetchDeepinfra(ctx: RouterQuotaContext): Promise<RouterQuotaResul
   ]);
   if (checklistResponse.status === 401) throw new Error('DeepInfra API Key 无效');
   if (checklistResponse.status !== 200) throw new Error(`DeepInfra HTTP ${checklistResponse.status}`);
-  const checklist = record(await checklistResponse.json());
+  const checklist = await readJsonRecord(checklistResponse, 'DeepInfra');
   const balance =
-    pickNumber(record(checklist?.data), ['stripe_balance']) ?? pickNumber(checklist, ['stripe_balance']);
+    pickNumber(asRecord(checklist.data), ['stripe_balance']) ?? pickNumber(checklist, ['stripe_balance']);
   let used: number | null = null;
   if (usageResponse?.status === 200) {
-    const usage = record(await usageResponse.json());
-    used = pickNumber(usage, ['usage']) ?? pickNumber(record(usage?.data), ['usage']);
+    const usage = await readJsonRecord(usageResponse, 'DeepInfra');
+    used = pickNumber(usage, ['usage']) ?? pickNumber(asRecord(usage.data), ['usage']);
   }
   if (balance === null && used === null) throw new Error('DeepInfra 未返回余额或用量');
   return {
@@ -321,11 +330,11 @@ async function fetchElevenlabs(ctx: RouterQuotaContext): Promise<RouterQuotaResu
   });
   if (response.status === 401) throw new Error('ElevenLabs API Key 无效');
   if (response.status !== 200) throw new Error(`ElevenLabs HTTP ${response.status}`);
-  const body = record(await response.json());
+  const body = await readJsonRecord(response, 'ElevenLabs');
   const used = pickNumber(body, ['character_count']);
   const limit = pickNumber(body, ['character_limit']);
   if (used === null || limit === null || limit <= 0) throw new Error('ElevenLabs 响应缺少字符额度');
-  const tier = typeof body?.tier === 'string' ? body.tier : null;
+  const tier = stringValue(body.tier);
   return {
     windows: [
       {
@@ -349,14 +358,13 @@ async function fetchVenice(ctx: RouterQuotaContext): Promise<RouterQuotaResult> 
   });
   if (response.status === 401) throw new Error('Venice API Key 无效');
   if (response.status !== 200) throw new Error(`Venice HTTP ${response.status}`);
-  const body = record(await response.json());
-  if (!body) throw new Error('Venice 响应不是对象');
-  const balances = record(body.balances);
+  const body = await readJsonRecord(response, 'Venice');
+  const balances = asRecord(body.balances);
   const usd = pickNumber(balances, ['usd']);
   const diem = pickNumber(balances, ['diem']);
   const allocation = pickNumber(body, ['diemEpochAllocation']);
   const canConsume = body.canConsume === true;
-  const currency = typeof body.consumptionCurrency === 'string' ? body.consumptionCurrency.toUpperCase() : null;
+  const currency = stringValue(body.consumptionCurrency)?.toUpperCase() ?? null;
   const windows: RouterQuotaWindow[] = [];
   if (!canConsume) {
     windows.push({
@@ -395,8 +403,8 @@ async function fetchMinimax(ctx: RouterQuotaContext): Promise<RouterQuotaResult>
   });
   if (response.status === 401 || response.status === 403) throw new Error('MiniMax API Key 无效');
   if (response.status !== 200) throw new Error(`MiniMax HTTP ${response.status}`);
-  const body = record(await response.json());
-  const data = record(body?.data);
+  const body = await readJsonRecord(response, 'MiniMax');
+  const data = asRecord(body.data);
   if (!data) throw new Error('MiniMax 响应缺少 data');
   const windows: RouterQuotaWindow[] = [];
   const intervalUsed = pickNumber(data, ['current_interval_usage_count']);
@@ -448,9 +456,9 @@ async function fetchXai(ctx: RouterQuotaContext): Promise<RouterQuotaResult> {
   }
   if (response.status === 404) throw new Error('xAI 团队不存在或 Team ID 不匹配');
   if (response.status !== 200) throw new Error(`xAI HTTP ${response.status}`);
-  const body = record(await response.json());
-  const total = record(record(body?.total)?.val) ?? record(body?.total);
-  const raw = total && typeof total.val === 'string' ? total.val : typeof body?.total === 'string' ? body.total : null;
+  const body = await readJsonRecord(response, 'xAI');
+  const total = asRecord(asRecord(body.total)?.val) ?? asRecord(body.total);
+  const raw = stringValue(total?.val) ?? stringValue(body.total);
   if (!raw || !/^-?\d+(\.\d+)?$/.test(raw.trim())) throw new Error('xAI 响应缺少余额');
   return {
     windows: [],
@@ -482,8 +490,8 @@ async function fetchWarp(ctx: RouterQuotaContext): Promise<RouterQuotaResult> {
   });
   if (response.status === 401) throw new Error('Warp API Key 无效');
   if (response.status !== 200) throw new Error(`Warp HTTP ${response.status}`);
-  const body = record(await response.json());
-  const info = record(record(record(record(body?.data)?.user)?.user)?.requestLimitInfo);
+  const body = await readJsonRecord(response, 'Warp');
+  const info = asRecord(asRecord(asRecord(asRecord(body.data)?.user)?.user)?.requestLimitInfo);
   const limit = pickNumber(info, ['requestLimit']);
   const used = pickNumber(info, ['requestsUsedSinceLastRefresh']);
   if (limit === null || used === null) throw new Error('Warp 响应缺少 requestLimitInfo');
@@ -495,7 +503,7 @@ async function fetchWarp(ctx: RouterQuotaContext): Promise<RouterQuotaResult> {
         id: 'requests',
         label: unlimited ? 'Unlimited' : 'Requests',
         usedPercent: unlimited ? 0 : limit > 0 ? clamp((used / limit) * 100) : 0,
-        resetsAt: nextRefresh && nextRefresh > 0 ? nextRefresh * 1000 : null,
+        resetsAt: nextRefresh !== null && nextRefresh > 0 ? isoToMs(isoFromMilliseconds(nextRefresh * 1000)) : null,
         windowMinutes: null,
       },
     ],
@@ -511,7 +519,7 @@ async function fetchCrof(ctx: RouterQuotaContext): Promise<RouterQuotaResult> {
     signal: AbortSignal.timeout(20_000),
   });
   if (response.status !== 200) throw new Error(`Crof HTTP ${response.status}`);
-  const body = record(await response.json());
+  const body = await readJsonRecord(response, 'Crof');
   const credits = pickNumber(body, ['credits']);
   if (credits === null) throw new Error('Crof 响应缺少 credits');
   const plan = pickNumber(body, ['requests_plan']);
@@ -550,8 +558,8 @@ async function fetchZenmux(ctx: RouterQuotaContext): Promise<RouterQuotaResult> 
   const windows: RouterQuotaWindow[] = [];
   let plan: string | null = null;
   if (subResponse.status === 200) {
-    const body = record(await subResponse.json());
-    const sub = record(body?.data) ?? body;
+    const body = await readJsonRecord(subResponse, 'ZenMux');
+    const sub = asRecord(body.data) ?? body;
     const used = pickNumber(sub, ['used', 'usage', 'used_credits']);
     const limit = pickNumber(sub, ['limit', 'quota', 'total_credits']);
     if (used !== null && limit !== null && limit > 0) {
@@ -563,12 +571,12 @@ async function fetchZenmux(ctx: RouterQuotaContext): Promise<RouterQuotaResult> 
         windowMinutes: 30 * 1440,
       });
     }
-    plan = typeof sub?.plan_name === 'string' ? sub.plan_name : typeof sub?.plan === 'string' ? sub.plan : null;
+    plan = stringValue(sub.plan_name) ?? stringValue(sub.plan);
   }
   let balance: number | null = null;
   if (paygResponse.status === 200) {
-    const body = record(await paygResponse.json());
-    const payg = record(body?.data) ?? body;
+    const body = await readJsonRecord(paygResponse, 'ZenMux');
+    const payg = asRecord(body.data) ?? body;
     balance = pickNumber(payg, ['balance', 'available', 'remaining', 'total_balance']);
   }
   if (windows.length === 0 && balance === null) throw new Error('ZenMux 订阅与按量余额均未取到');
@@ -587,8 +595,8 @@ async function fetchNeuralwatt(ctx: RouterQuotaContext): Promise<RouterQuotaResu
   });
   if (response.status === 401) throw new Error('NeuralWatt API Key 无效');
   if (response.status !== 200) throw new Error(`NeuralWatt HTTP ${response.status}`);
-  const body = record(await response.json());
-  const data = record(body?.data) ?? body;
+  const body = await readJsonRecord(response, 'NeuralWatt');
+  const data = asRecord(body.data) ?? body;
   const used = pickNumber(data, ['kwh_used', 'used']);
   const remaining = pickNumber(data, ['kwh_remaining', 'remaining']);
   if (used === null && remaining === null) throw new Error('NeuralWatt 响应缺少 kwh 用量');
@@ -619,7 +627,7 @@ async function fetchLlmproxy(ctx: RouterQuotaContext): Promise<RouterQuotaResult
     signal: AbortSignal.timeout(20_000),
   });
   if (response.status !== 200) throw new Error(`LLM Proxy HTTP ${response.status}`);
-  const body = record(await response.json());
+  const body = await readJsonRecord(response, 'LLM Proxy');
   const total = pickNumber(body, ['credential_count', 'total']);
   const exhausted = pickNumber(body, ['exhausted_count', 'exhausted']);
   const active = pickNumber(body, ['active_count', 'active']);
@@ -650,8 +658,8 @@ async function fetchLitellm(ctx: RouterQuotaContext): Promise<RouterQuotaResult>
     signal: AbortSignal.timeout(20_000),
   });
   if (response.status !== 200) throw new Error(`LiteLLM HTTP ${response.status}`);
-  const body = record(await response.json());
-  const info = record(body?.info) ?? body;
+  const body = await readJsonRecord(response, 'LiteLLM');
+  const info = asRecord(body.info) ?? body;
   const spend = pickNumber(info, ['spend', 'total_spend']);
   const maxBudget = pickNumber(info, ['max_budget', 'budget']);
   if (spend === null) throw new Error('LiteLLM 响应缺少 info.spend');
@@ -683,7 +691,7 @@ async function fetchCodebuffQuota(ctx: RouterQuotaContext): Promise<RouterQuotaR
     ctx.fetchImpl('https://www.codebuff.com/api/user/subscription', { headers, signal: AbortSignal.timeout(20_000) }),
   ]);
   if (usageResponse.status !== 200) throw new Error(`Codebuff usage HTTP ${usageResponse.status}`);
-  const usage = record(await usageResponse.json());
+  const usage = await readJsonRecord(usageResponse, 'Codebuff');
   const used = pickNumber(usage, ['used', 'credits_used', 'total_used']);
   const limit = pickNumber(usage, ['limit', 'credits_limit', 'total_limit', 'quota']);
   const windows: RouterQuotaWindow[] = [];
@@ -698,8 +706,8 @@ async function fetchCodebuffQuota(ctx: RouterQuotaContext): Promise<RouterQuotaR
   }
   let plan: string | null = null;
   if (subResponse.status === 200) {
-    const sub = record(await subResponse.json());
-    plan = typeof sub?.plan === 'string' ? sub.plan : typeof sub?.tier === 'string' ? sub.tier : null;
+    const sub = await readJsonRecord(subResponse, 'Codebuff');
+    plan = stringValue(sub.plan) ?? stringValue(sub.tier);
   }
   if (windows.length === 0 && !plan) throw new Error('Codebuff 未取到用量或订阅');
   return {
@@ -984,7 +992,7 @@ export async function executeQuotaStrategy(
       queriedAt: now,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : '余量查询失败';
+    const message = error instanceof Error ? errorMessage(error) : '余量查询失败';
     return { ...base, error: message, queriedAt: now };
   }
 }
@@ -997,10 +1005,10 @@ function dotValue(data: unknown, path: string): unknown {
     if (Array.isArray(current)) {
       const index = Number(segment);
       current = Number.isInteger(index) ? current[index] : undefined;
-    } else if (typeof current === 'object') {
-      current = (current as Record<string, unknown>)[segment];
     } else {
-      return undefined;
+      const record = asRecord(current);
+      if (!record) return undefined;
+      current = record[segment];
     }
   }
   return current;
@@ -1018,7 +1026,7 @@ async function fetchCustomJs(ctx: RouterQuotaContext): Promise<RouterQuotaResult
     apiKey: ctx.apiKey,
     baseUrl: ctx.baseUrl,
     config: ctx.config,
-    result: null as unknown,
+    result: null,
     getJSON: async (url: string, options?: { headers?: Record<string, string>; timeoutSeconds?: number }) => {
       const response = await ctx.fetchImpl(url, {
         headers: { accept: 'application/json', ...(options?.headers ?? {}) },
@@ -1027,7 +1035,7 @@ async function fetchCustomJs(ctx: RouterQuotaContext): Promise<RouterQuotaResult
       const text = await response.text();
       let json: unknown = null;
       try {
-        json = text ? JSON.parse(text) : null;
+        json = text ? parseJson(text) : null;
       } catch {
         json = null;
       }
@@ -1035,23 +1043,23 @@ async function fetchCustomJs(ctx: RouterQuotaContext): Promise<RouterQuotaResult
     },
     pct: (used: number, limit: number) => clamp(limit > 0 ? (used / limit) * 100 : 0),
   };
-  const promise = vm.runInNewContext(`(async () => {\n${script}\n})()`, sandbox, {
+  const promise: unknown = vm.runInNewContext(`(async () => {\n${script}\n})()`, sandbox, {
     timeout: 20_000,
     contextCodeGeneration: { strings: false, wasm: false },
   });
   const result = (await promise) ?? sandbox.result;
-  const data = record(result);
+  const data = asRecord(result);
   if (!data) throw new Error('Custom JS 脚本必须返回对象');
   const rawWindows = Array.isArray(data.windows) ? data.windows : [];
   const windows: RouterQuotaWindow[] = rawWindows.flatMap((raw) => {
-    const item = record(raw);
+    const item = asRecord(raw);
     if (!item) return [];
     const usedPercent = numberValue(item.usedPercent);
     if (usedPercent === null) return [];
     return [
       {
-        id: typeof item.id === 'string' ? item.id : 'custom',
-        label: typeof item.label === 'string' ? item.label : 'Custom',
+        id: stringValue(item.id) ?? 'custom',
+        label: stringValue(item.label) ?? 'Custom',
         usedPercent: clamp(usedPercent),
         resetsAt: numberValue(item.resetsAt),
         windowMinutes: numberValue(item.windowMinutes),
@@ -1063,12 +1071,14 @@ async function fetchCustomJs(ctx: RouterQuotaContext): Promise<RouterQuotaResult
   return {
     windows,
     balance,
-    currency: typeof data.currency === 'string' ? data.currency : null,
+    currency: stringValue(data.currency),
     details: Array.isArray(data.details)
       ? data.details.flatMap((raw) => {
-          const item = record(raw);
-          if (!item || typeof item.label !== 'string' || typeof item.value !== 'string') return [];
-          return [{ label: item.label, value: item.value }];
+          const item = asRecord(raw);
+          const label = stringValue(item?.label);
+          const value = stringValue(item?.value);
+          if (!item || label === null || value === null) return [];
+          return [{ label, value }];
         })
       : [],
   };
@@ -1082,10 +1092,10 @@ async function fetchCustomHttp(ctx: RouterQuotaContext): Promise<RouterQuotaResu
   let headers: Record<string, string> = { accept: 'application/json' };
   if (config.headers) {
     try {
-      const parsed = JSON.parse(config.headers) as unknown;
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const parsed = asRecord(parseJson(config.headers));
+      if (parsed) {
         headers = Object.fromEntries(
-          Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [key, String(value)]),
+          Object.entries(parsed).map(([key, value]) => [key, String(value)]),
         );
       }
     } catch {
@@ -1097,7 +1107,7 @@ async function fetchCustomHttp(ctx: RouterQuotaContext): Promise<RouterQuotaResu
   else if (auth === 'x-api-key') headers['x-api-key'] = ctx.apiKey;
 
   const method = (config.method ?? 'GET').toUpperCase();
-  const init: RequestInit = {
+  const init: RouterRequestInit = {
     method,
     headers,
     signal: AbortSignal.timeout(20_000),
@@ -1109,7 +1119,7 @@ async function fetchCustomHttp(ctx: RouterQuotaContext): Promise<RouterQuotaResu
   const response = await ctx.fetchImpl(url, init);
   if (response.status === 401 || response.status === 403) throw new Error('自定义策略凭证无效');
   if (response.status !== 200) throw new Error(`自定义策略 HTTP ${response.status}`);
-  const payload = (await response.json()) as unknown;
+  const payload = await readJson(response, '自定义策略');
 
   const percent = dotNumber(payload, config.percentPath);
   const used = dotNumber(payload, config.usedPath);

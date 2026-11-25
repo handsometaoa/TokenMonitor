@@ -1,4 +1,5 @@
 import type { RouterProtocol } from '../../../shared/routerTypes';
+import { finiteNumber, stringValue as nullableStringValue } from '../../../shared/validation';
 
 export type FinishReason = 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'error';
 
@@ -152,18 +153,19 @@ export function finishReason(value: unknown): FinishReason {
 }
 
 export function stringValue(value: unknown): string {
-  return typeof value === 'string' ? value : '';
+  return nullableStringValue(value) ?? '';
 }
 
 export function numberValue(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  return finiteNumber(value);
 }
 
 export function parseArguments(value: unknown): string {
   if (typeof value === 'string') return value;
-  if (value && typeof value === 'object') {
+  if (value !== null && typeof value === 'object') {
     try {
-      return JSON.stringify(value);
+      const serialized = JSON.stringify(value);
+      return typeof serialized === 'string' ? serialized : '{}';
     } catch {
       return '{}';
     }
@@ -173,6 +175,6 @@ export function parseArguments(value: unknown): string {
 
 export function dataUrlToAnthropicSource(url: string): Record<string, unknown> | null {
   const match = /^data:([^;,]+);base64,(.+)$/i.exec(url);
-  if (!match) return null;
+  if (!match?.[1] || !match[2]) return null;
   return { type: 'base64', media_type: match[1], data: match[2] };
 }

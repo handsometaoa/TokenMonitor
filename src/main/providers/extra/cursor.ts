@@ -1,12 +1,10 @@
+import { asRecord, errorMessage, finiteNumber, stringValue } from '../../../shared/validation';
 import type { ExtraProviderCredential, ExtraFetch, RawExtraSnapshot, RawExtraWindow } from './types';
 import { ExtraProviderError, clampPercent, errorForStatus, isoReset } from './types';
 
-function record(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function numberValue(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+function dateMilliseconds(value: unknown): number {
+  const text = stringValue(value);
+  return text === null ? Number.NaN : Date.parse(text);
 }
 
 export async function fetchCursorSnapshot(
@@ -14,7 +12,7 @@ export async function fetchCursorSnapshot(
   fetchImpl: ExtraFetch,
   now = Date.now(),
 ): Promise<RawExtraSnapshot> {
-  let response: Response;
+  let response: Awaited<ReturnType<ExtraFetch>>;
   try {
     response = await fetchImpl('https://cursor.com/api/usage-summary', {
       method: 'GET',
@@ -29,7 +27,7 @@ export async function fetchCursorSnapshot(
       cache: 'no-store',
     });
   } catch (error) {
-    throw new ExtraProviderError('network', error instanceof Error ? error.message : 'Cursor 网络请求失败。');
+    throw new ExtraProviderError('network', errorMessage(error) || 'Cursor 网络请求失败。');
   }
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
@@ -38,29 +36,31 @@ export async function fetchCursorSnapshot(
     throw errorForStatus(response.status, 'Cursor');
   }
 
-  let json: Record<string, unknown>;
+  let json: unknown;
   try {
-    json = (await response.json()) as Record<string, unknown>;
+    json = await response.json();
   } catch {
     throw new ExtraProviderError('malformed', 'Cursor 用量响应无法解析。');
   }
+  const payload = asRecord(json);
+  if (!payload) throw new ExtraProviderError('malformed', 'Cursor 用量响应格式无效。');
 
-  const individualUsage = record(json.individualUsage);
-  const plan = record(individualUsage?.plan);
-  const overall = record(individualUsage?.overall);
-  const team = record(json.teamUsage);
-  const pooled = record(team?.pooled);
-  const onDemand = record(individualUsage?.onDemand);
+  const individualUsage = asRecord(payload.individualUsage);
+  const plan = asRecord(individualUsage?.plan);
+  const overall = asRecord(individualUsage?.overall);
+  const team = asRecord(payload.teamUsage);
+  const pooled = asRecord(team?.pooled);
+  const onDemand = asRecord(individualUsage?.onDemand);
 
-  const total = numberValue(plan?.totalPercentUsed);
-  const auto = numberValue(plan?.autoPercentUsed);
-  const api = numberValue(plan?.apiPercentUsed);
-  const planUsed = numberValue(plan?.used);
-  const planLimit = numberValue(plan?.limit);
-  const overallUsed = numberValue(overall?.used);
-  const overallLimit = numberValue(overall?.limit);
-  const pooledUsed = numberValue(pooled?.used);
-  const pooledLimit = numberValue(pooled?.limit);
+  const total = finiteNumber(plan?.totalPercentUsed);
+  const auto = finiteNumber(plan?.autoPercentUsed);
+  const api = finiteNumber(plan?.apiPercentUsed);
+  const planUsed = finiteNumber(plan?.used);
+  const planLimit = finiteNumber(plan?.limit);
+  const overallUsed = finiteNumber(overall?.used);
+  const overallLimit = finiteNumber(overall?.limit);
+  const pooledUsed = finiteNumber(pooled?.used);
+  const pooledLimit = finiteNumber(pooled?.limit);
 
   let usedPercent: number | null = null;
   if (total !== null) usedPercent = total;
@@ -73,12 +73,12 @@ export async function fetchCursorSnapshot(
     throw new ExtraProviderError('malformed', 'Cursor 用量响应缺少额度数据。');
   }
 
-  const billingStart = typeof json.billingCycleStart === 'string' ? Date.parse(json.billingCycleStart) : Number.NaN;
-  const billingEnd = typeof json.billingCycleEnd === 'string' ? Date.parse(json.billingCycleEnd) : Number.NaN;
+  const billingStart = dateMilliseconds(payload.billingCycleStart);
+  const billingEnd = dateMilliseconds(payload.billingCycleEnd);
   const windowMs = Number.isFinite(billingStart) && Number.isFinite(billingEnd) && billingEnd > billingStart
     ? billingEnd - billingStart
     : undefined;
-  const resetsAt = Number.isFinite(billingEnd) ? new Date(billingEnd).toISOString() : null;
+  const resetsAt = isoReset(payload.billingCycleEnd);
   const used = clampPercent(usedPercent);
   const windows: RawExtraWindow[] = [
     {
@@ -92,8 +92,8 @@ export async function fetchCursorSnapshot(
   ];
 
   if (onDemand?.enabled !== false) {
-    const usedCents = numberValue(onDemand?.used);
-    const limitCents = numberValue(onDemand?.limit);
+    const usedCents = finiteNumber(onDemand?.used);
+    const limitCents = finiteNumber(onDemand?.limit);
     if (usedCents !== null && limitCents && limitCents > 0) {
       const onDemandUsed = clampPercent((usedCents / limitCents) * 100);
       windows.push({
@@ -107,7 +107,7 @@ export async function fetchCursorSnapshot(
     }
   }
 
-  const membership = typeof json.membershipType === 'string' ? json.membershipType : '';
+  const membership = stringValue(payload.membershipType) ?? '';
   const planLabel = membership ? `Cursor ${membership}` : 'Cursor';
   return {
     providerId: 'cursor',

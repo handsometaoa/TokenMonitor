@@ -74,7 +74,13 @@ export interface TokenMonitorApi {
   setLaunchAtLogin(enabled: boolean): Promise<AppState>;
   quit(): Promise<void>;
   onStateChanged(listener: (state: AppState) => void): () => void;
+  onNavigate(listener: (target: AppNavigateTarget) => void): () => void;
 }
+
+export type AppNavigateTarget = 'router' | 'settings' | 'panel';
+
+/** Main → renderer channel for in-window navigation (tray/IPC shortcuts). */
+export const APP_NAVIGATE = 'app:navigate';
 
 export const IPC = {
   getState: 'app:get-state',

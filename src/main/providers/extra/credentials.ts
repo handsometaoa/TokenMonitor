@@ -3,25 +3,17 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { ExtraProviderId } from '../../../shared/types';
+import { asRecord, nonEmptyString, parseJson } from '../../../shared/validation';
 import type { ProviderSecretStore } from '../../services/providerSecrets';
 import type { ExtraProviderCredential } from './types';
 
 function readJson(path: string): Record<string, unknown> | null {
   try {
     if (!existsSync(path)) return null;
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+    return asRecord(parseJson(readFileSync(path, 'utf8')));
   } catch {
     return null;
   }
-}
-
-function stringValue(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function nestedRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
 function codexHome(): string {
@@ -37,29 +29,29 @@ function codexCredential(): ExtraProviderCredential | null {
   for (const path of paths) {
     const json = readJson(path);
     if (!json) continue;
-    const tokens = nestedRecord(json.tokens);
-    const access = stringValue(tokens?.access_token) ?? stringValue(tokens?.accessToken);
+    const tokens = asRecord(json.tokens);
+    const access = nonEmptyString(tokens?.access_token) ?? nonEmptyString(tokens?.accessToken);
     if (access) {
       return {
         providerId: 'codex',
         value: access,
         source: 'auth-file',
-        accountId: stringValue(tokens?.account_id) ?? stringValue(tokens?.accountId) ?? undefined,
+        accountId: nonEmptyString(tokens?.account_id) ?? nonEmptyString(tokens?.accountId) ?? undefined,
       };
     }
-    const openAiKey = stringValue(json.OPENAI_API_KEY);
+    const openAiKey = nonEmptyString(json.OPENAI_API_KEY);
     if (openAiKey) {
       return { providerId: 'codex', value: openAiKey, source: 'auth-file' };
     }
-    const openCodeOpenAI = nestedRecord(json.openai);
-    if (openCodeOpenAI && stringValue(openCodeOpenAI.type)?.toLowerCase() === 'oauth') {
-      const accessToken = stringValue(openCodeOpenAI.access);
+    const openCodeOpenAI = asRecord(json.openai);
+    if (openCodeOpenAI && nonEmptyString(openCodeOpenAI.type)?.toLowerCase() === 'oauth') {
+      const accessToken = nonEmptyString(openCodeOpenAI.access);
       if (accessToken) {
         return {
           providerId: 'codex',
           value: accessToken,
           source: 'auth-file',
-          accountId: stringValue(openCodeOpenAI.accountId) ?? undefined,
+          accountId: nonEmptyString(openCodeOpenAI.accountId) ?? undefined,
         };
       }
     }
@@ -85,14 +77,14 @@ function claudeCredential(): ExtraProviderCredential | null {
   for (const path of paths) {
     const json = readJson(path);
     if (!json) continue;
-    const oauth = nestedRecord(json.claudeAiOauth);
-    const accessToken = stringValue(oauth?.accessToken) ?? stringValue(oauth?.access_token);
+    const oauth = asRecord(json.claudeAiOauth);
+    const accessToken = nonEmptyString(oauth?.accessToken) ?? nonEmptyString(oauth?.access_token);
     if (accessToken) {
       return {
         providerId: 'claude',
         value: accessToken,
         source: 'auth-file',
-        planLabel: stringValue(oauth?.subscriptionType) ?? stringValue(oauth?.rateLimitTier) ?? undefined,
+        planLabel: nonEmptyString(oauth?.subscriptionType) ?? nonEmptyString(oauth?.rateLimitTier) ?? undefined,
       };
     }
   }
@@ -105,8 +97,7 @@ function jwtPayload(token: string): Record<string, unknown> | null {
   try {
     const encoded = parts[1].replaceAll('-', '+').replaceAll('_', '/');
     const padded = encoded + '='.repeat((4 - (encoded.length % 4)) % 4);
-    const json = JSON.parse(Buffer.from(padded, 'base64').toString('utf8')) as unknown;
-    return nestedRecord(json);
+    return asRecord(parseJson(Buffer.from(padded, 'base64').toString('utf8')));
   } catch {
     return null;
   }
@@ -114,7 +105,7 @@ function jwtPayload(token: string): Record<string, unknown> | null {
 
 function cursorCookieFromToken(token: string): string | null {
   const payload = jwtPayload(token);
-  const subject = stringValue(payload?.sub);
+  const subject = nonEmptyString(payload?.sub);
   const userID = subject?.split('|').filter(Boolean).pop();
   if (!userID) return null;
   return `WorkosCursorSessionToken=${encodeURIComponent(`${userID}::${token}`)}`;
@@ -132,10 +123,8 @@ function cursorLocalToken(): string | null {
     let db: DatabaseSync | null = null;
     try {
       db = new DatabaseSync(path, { readOnly: true, timeout: 1000 });
-      const row = db.prepare("SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken' LIMIT 1").get() as
-        | { value: string | Buffer }
-        | undefined;
-      const value = row?.value;
+      const row: unknown = db.prepare("SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken' LIMIT 1").get();
+      const value = asRecord(row)?.value;
       if (typeof value === 'string' && value.trim() && !value.startsWith('cursor-safe-storage:')) {
         return value.trim();
       }
@@ -180,14 +169,14 @@ function zcodeConfig(): Record<string, unknown> | null {
 }
 
 function enabledZcodeProviders(config: Record<string, unknown> | null): Array<{ id: string; provider: Record<string, unknown> }> {
-  const providers = nestedRecord(config?.provider);
+  const providers = asRecord(config?.provider);
   if (!providers) return [];
   const result: Array<{ id: string; provider: Record<string, unknown> }> = [];
   for (const [id, raw] of Object.entries(providers)) {
-    const provider = nestedRecord(raw);
+    const provider = asRecord(raw);
     if (!provider) continue;
-    const options = nestedRecord(provider.options);
-    const apiKey = stringValue(options?.apiKey);
+    const options = asRecord(provider.options);
+    const apiKey = nonEmptyString(options?.apiKey);
     if (apiKey && provider.enabled !== false) result.push({ id, provider });
   }
   return result;
@@ -205,15 +194,15 @@ function zaiCredential(): ExtraProviderCredential | null {
   const candidates = enabledZcodeProviders(zcodeConfig());
   for (const { id, provider } of candidates) {
     if (!id.includes('builtin:zai')) continue;
-    const options = nestedRecord(provider.options);
-    const apiKey = stringValue(options?.apiKey);
+    const options = asRecord(provider.options);
+    const apiKey = nonEmptyString(options?.apiKey);
     if (!apiKey) continue;
     return {
       providerId: 'zai',
       value: apiKey,
       source: 'zcode',
       region: 'global',
-      planLabel: stringValue(provider.name) ?? undefined,
+      planLabel: nonEmptyString(provider.name) ?? undefined,
       organizationId: process.env.BIGMODEL_ORGANIZATION?.trim() || undefined,
       projectId: process.env.BIGMODEL_PROJECT?.trim() || undefined,
     };
@@ -231,21 +220,21 @@ function zcodeCredential(): ExtraProviderCredential | null {
   ];
   const chosen = preferred[0];
   if (!chosen) return null;
-  const options = nestedRecord(chosen.provider.options);
-  const apiKey = stringValue(options?.apiKey);
+  const options = asRecord(chosen.provider.options);
+  const apiKey = nonEmptyString(options?.apiKey);
   if (!apiKey) return null;
-  const baseURL = stringValue(options?.baseURL) ?? '';
+  const baseURL = nonEmptyString(options?.baseURL) ?? '';
   const region = baseURL.includes('open.bigmodel.cn') || chosen.id.includes('bigmodel') ? 'bigmodel-cn' : 'global';
   const cache = readJson(join(homedir(), '.zcode', 'v2', 'coding-plan-cache.json'));
-  const cacheEntry = nestedRecord(nestedRecord(cache?.entryStatus)?.items);
-  const chosenEntry = nestedRecord(cacheEntry?.[chosen.id]);
-  const status = stringValue(chosenEntry?.status);
+  const cacheEntry = asRecord(asRecord(cache?.entryStatus)?.items);
+  const chosenEntry = asRecord(cacheEntry?.[chosen.id]);
+  const status = nonEmptyString(chosenEntry?.status);
   const planLabel =
     status === 'available'
       ? chosen.id.includes('bigmodel')
         ? 'BigModel Coding Plan'
         : 'ZCode Coding Plan'
-      : stringValue(chosen.provider.name) ?? undefined;
+      : nonEmptyString(chosen.provider.name) ?? undefined;
   return {
     providerId: 'zcode',
     value: apiKey,
@@ -269,23 +258,25 @@ function manualCredential(providerId: ExtraProviderId, secret: string): ExtraPro
     // Team plans may need the BigModel Organization/Project selectors. Accept either a
     // bare API key or a JSON object: { "apiKey": "...", "organizationId": "...", "projectId": "..." }
     try {
-      const parsed = JSON.parse(secret) as Record<string, unknown>;
-      const apiKey = stringValue(parsed.apiKey) ?? stringValue(parsed.key);
-      if (apiKey) {
-        return {
-          providerId,
-          value: apiKey,
-          source: 'manual',
-          region:
-            stringValue(parsed.region) === 'bigmodel-cn' ||
-            stringValue(parsed.region) === 'global'
-              ? (stringValue(parsed.region) as 'bigmodel-cn' | 'global')
-              : process.env.Z_AI_REGION === 'bigmodel-cn'
-                ? 'bigmodel-cn'
-                : 'global',
-          organizationId: stringValue(parsed.organizationId) ?? undefined,
-          projectId: stringValue(parsed.projectId) ?? undefined,
-        };
+      const parsed = asRecord(parseJson(secret));
+      if (parsed) {
+        const apiKey = nonEmptyString(parsed.apiKey) ?? nonEmptyString(parsed.key);
+        if (apiKey) {
+          const region = nonEmptyString(parsed.region);
+          return {
+            providerId,
+            value: apiKey,
+            source: 'manual',
+            region:
+              region === 'bigmodel-cn' || region === 'global'
+                ? region
+                : process.env.Z_AI_REGION === 'bigmodel-cn'
+                  ? 'bigmodel-cn'
+                  : 'global',
+            organizationId: nonEmptyString(parsed.organizationId) ?? undefined,
+            projectId: nonEmptyString(parsed.projectId) ?? undefined,
+          };
+        }
       }
     } catch {
       // Bare key below.

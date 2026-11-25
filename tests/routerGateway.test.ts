@@ -3,11 +3,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ProviderSecretStore } from '../src/main/services/providerSecrets';
 import { Logger } from '../src/main/services/logger';
 import { RouterRepository } from '../src/main/router/db';
 import { RouterBalancer } from '../src/main/router/balancer';
 import { RouterGateway } from '../src/main/router/gateway';
+import { asRecord } from '../src/shared/validation';
+import { defined, parseRecord, recordArray, responseRecord } from './helpers';
 
 const cleanups: Array<() => Promise<void> | void> = [];
 
@@ -88,7 +89,7 @@ async function setup(options: {
   if (options.apiKey !== '') secrets.set(`router:${provider.id}`, options.apiKey ?? 'sk-upstream');
   const fakeSecrets = {
     get: (id: string) => secrets.get(id) ?? null,
-  } as unknown as ProviderSecretStore;
+  };
   const gateway = new RouterGateway(repo, fakeSecrets, new RouterBalancer(repo), logger, (input, init) => fetch(input, init), () => repo.getServiceConfig());
   await gateway.start();
   cleanups.push(() => repo.close());
@@ -108,7 +109,7 @@ describe('RouterGateway', () => {
         body += chunk.toString('utf8');
       });
       req.on('end', () => {
-        const parsed = JSON.parse(body) as { model: string };
+        const parsed = parseRecord(body);
         expect(parsed.model).toBe('upstream-model');
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(
@@ -129,31 +130,32 @@ describe('RouterGateway', () => {
       headers: { authorization: 'Bearer sk-router-test-key', 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'test-model', messages: [{ role: 'user', content: 'hi' }] }),
     });
-    const body = (await response.json()) as { choices: Array<{ message: { content: string } }> };
+    const body = await responseRecord(response);
+    const message = asRecord(defined(recordArray(body.choices)[0]).message);
     expect(response.status).toBe(200);
-    expect(body.choices[0].message.content).toBe('hello');
+    expect(message?.content).toBe('hello');
 
     await wait();
     const logs = repo.listLogs({ limit: 10 });
     expect(logs.total).toBe(1);
-    expect(logs.items[0].status).toBe(200);
-    expect(logs.items[0].publicModel).toBe('test-model');
-    expect(logs.items[0].totalTokens).toBe(15);
-    expect(logs.items[0].providerName).toBe('mock-upstream');
+    expect(defined(logs.items[0]).status).toBe(200);
+    expect(defined(logs.items[0]).publicModel).toBe('test-model');
+    expect(defined(logs.items[0]).totalTokens).toBe(15);
+    expect(defined(logs.items[0]).providerName).toBe('mock-upstream');
     const usage = repo.getUsage('today');
     expect(usage.totals.requestCount).toBe(1);
     expect(usage.totals.totalTokens).toBe(15);
   });
 
   it('converts OpenAI chat to Anthropic messages and back', async () => {
-    let captured: Record<string, unknown> | null = null;
+    const captured: { value: Record<string, unknown> | null } = { value: null };
     const { server, port: upstreamPort } = await upstreamServer((req, res) => {
       let body = '';
       req.on('data', (chunk: Buffer) => {
         body += chunk.toString('utf8');
       });
       req.on('end', () => {
-        captured = JSON.parse(body) as Record<string, unknown>;
+        captured.value = parseRecord(body);
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(
           JSON.stringify({
@@ -182,23 +184,22 @@ describe('RouterGateway', () => {
         max_tokens: 64,
       }),
     });
-    const body = (await response.json()) as {
-      choices: Array<{ message: { content: string } }>;
-      usage: { prompt_tokens: number; completion_tokens: number };
-    };
+    const body = await responseRecord(response);
+    const message = asRecord(defined(recordArray(body.choices)[0]).message);
+    const usage = asRecord(body.usage);
     expect(response.status).toBe(200);
-    expect(body.choices[0].message.content).toBe('converted');
-    expect(body.usage.prompt_tokens).toBe(8);
-    expect(body.usage.completion_tokens).toBe(4);
-    expect(captured).toMatchObject({ model: 'upstream-model', system: 'be brief', max_tokens: 64 });
-    const messages = captured?.messages as Array<{ role: string; content: unknown }>;
+    expect(message?.content).toBe('converted');
+    expect(usage?.prompt_tokens).toBe(8);
+    expect(usage?.completion_tokens).toBe(4);
+    expect(captured.value).toMatchObject({ model: 'upstream-model', system: 'be brief', max_tokens: 64 });
+    const messages = recordArray(defined(captured.value).messages);
     expect(messages).toHaveLength(1);
-    expect(messages[0].role).toBe('user');
+    expect(messages[0]?.role).toBe('user');
 
     await wait();
     const logs = repo.listLogs({ limit: 10 });
-    expect(logs.items[0].status).toBe(200);
-    expect(logs.items[0].totalTokens).toBe(12);
+    expect(defined(logs.items[0]).status).toBe(200);
+    expect(defined(logs.items[0]).totalTokens).toBe(12);
   });
 
   it('passes through OpenAI streaming SSE', async () => {
@@ -232,9 +233,9 @@ describe('RouterGateway', () => {
 
     await wait();
     const logs = repo.listLogs({ limit: 10 });
-    expect(logs.items[0].status).toBe(200);
-    expect(logs.items[0].stream).toBe(true);
-    expect(logs.items[0].totalTokens).toBe(10);
+    expect(defined(logs.items[0]).status).toBe(200);
+    expect(defined(logs.items[0]).stream).toBe(true);
+    expect(defined(logs.items[0]).totalTokens).toBe(10);
   });
 
   it('converts Anthropic streaming events to OpenAI SSE', async () => {
@@ -271,8 +272,8 @@ describe('RouterGateway', () => {
 
     await wait();
     const logs = repo.listLogs({ limit: 10 });
-    expect(logs.items[0].status).toBe(200);
-    expect(logs.items[0].totalTokens).toBe(11);
+    expect(defined(logs.items[0]).status).toBe(200);
+    expect(defined(logs.items[0]).totalTokens).toBe(11);
   });
 
   it('omits request and response bodies when body capture is disabled', async () => {
@@ -298,7 +299,7 @@ describe('RouterGateway', () => {
     });
     expect(response.status).toBe(200);
     await wait();
-    const log = repo.listLogs({ limit: 1 }).items[0];
+    const log = defined(repo.listLogs({ limit: 1 }).items[0]);
     expect(log.totalTokens).toBe(5);
     expect(log.requestBody).toBeNull();
     expect(log.responseBody).toBeNull();
@@ -312,7 +313,8 @@ describe('RouterGateway', () => {
       body: JSON.stringify({ model: 'test-model', messages: [] }),
     });
     expect(response.status).toBe(401);
-    const body = (await response.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('invalid_api_key');
+    const body = await responseRecord(response);
+    const error = asRecord(body.error);
+    expect(error?.code).toBe('invalid_api_key');
   });
 });

@@ -8,6 +8,7 @@ import type {
   RouterUsageOverview,
 } from '../../../../shared/routerTypes';
 import { RouterBadge, RouterStat, formatRouterDuration, formatRouterTime, statusTone } from '../components';
+import { Toggle } from '../../components/ui';
 
 export function Overview({
   state,
@@ -24,6 +25,18 @@ export function Overview({
 }) {
   const [logs, setLogs] = useState<RouterLogPage>({ items: [], total: 0 });
   const [usage, setUsage] = useState<RouterUsageOverview | null>(null);
+  const [gatewayBusy, setGatewayBusy] = useState(false);
+
+  const toggleGateway = async (enabled: boolean) => {
+    setGatewayBusy(true);
+    try {
+      await window.tokenMonitor.saveRouterServiceConfig({ enabled });
+    } catch (reason) {
+      onError(reason instanceof Error ? reason.message : '网关开关失败');
+    } finally {
+      setGatewayBusy(false);
+    }
+  };
 
   const load = async () => {
     try {
@@ -57,6 +70,14 @@ export function Overview({
           value={serviceRunning ? '运行中' : state.service.state === 'error' ? '错误' : '已停止'}
           hint={serviceRunning ? `127.0.0.1:${state.service.port}` : state.service.error ?? '未启动'}
           tone={serviceRunning ? 'good' : state.service.state === 'error' ? 'danger' : undefined}
+          action={
+            <Toggle
+              checked={state.service.config.enabled}
+              onChange={(enabled) => void toggleGateway(enabled)}
+              disabled={gatewayBusy}
+              label={state.service.config.enabled ? '停止本地网关' : '启动本地网关'}
+            />
+          }
         />
         <RouterStat label="今日请求" value={usage ? usage.totals.requestCount.toLocaleString() : '—'} hint={`失败 ${usage?.totals.failCount ?? 0}`} />
         <RouterStat label="今日 Tokens" value={usage ? usage.totals.totalTokens.toLocaleString() : '—'} hint={`缓存读 ${usage?.totals.cacheReadTokens.toLocaleString() ?? 0}`} />

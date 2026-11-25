@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Copy, KeyRound, Play, RefreshCw, Square } from 'lucide-react';
 import type { RouterState } from '../../../../shared/routerTypes';
-import { CopyButton, Field, RouterBadge, RouterStat } from '../components';
+import { CopyButton, RouterBadge, RouterStat } from '../components';
 
 export function ServicePage({
   state,
@@ -83,38 +83,76 @@ export function ServicePage({
             <div className="router-card-sub">修改端口或开关会重启网关；API Key 保存后立即生效。</div>
           </div>
           <div className="router-row-actions">
-            <button type="button" className="router-btn" onClick={regenerate}>
-              <KeyRound size={14} />
-              重新生成 Key
-            </button>
             <button type="button" className="router-btn primary" onClick={() => void save()} disabled={busy}>
               {busy ? <RefreshCw size={14} className="spin" /> : enabled ? <Play size={14} /> : <Square size={14} />}
               {busy ? '保存中…' : '保存并应用'}
             </button>
           </div>
         </div>
-        <div className="router-form-grid">
-          <Field label="服务开关">
-            <label className="router-check">
-              <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
-              启动本地网关
-            </label>
-          </Field>
-          <Field label="端口" hint="1024-65535，仅本机监听">
-            <input className="router-input mono" value={port} onChange={(event) => setPort(event.target.value.replace(/\D/g, ''))} />
-          </Field>
-          <Field label="本地 API Key" hint="客户端访问网关时使用；与上游 Key 无关">
-            <input className="router-input mono" value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
-          </Field>
-          <Field label="上游代理 URL" hint="HTTP(S) 代理；留空直连，支持 CONNECT 隧道">
-            <input className="router-input mono" value={proxyUrl} onChange={(event) => setProxyUrl(event.target.value)} placeholder="http://127.0.0.1:7890" />
-          </Field>
-          <Field label="日志正文" hint="关闭后只记录状态、耗时和 token，不落库 prompt/回复正文">
-            <label className="router-check">
-              <input type="checkbox" checked={captureBodies} onChange={(event) => setCaptureBodies(event.target.checked)} />
-              保存请求 / 响应正文
-            </label>
-          </Field>
+        <div className="router-config-list">
+          <div className="router-config-row">
+            <div className="router-config-info">
+              <div className="router-config-label">服务开关</div>
+              <div className="router-config-hint">关闭后本地网关停止监听，客户端将无法连接。</div>
+            </div>
+            <div className="router-config-control">
+              <label className="router-check">
+                <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+                启动本地网关
+              </label>
+            </div>
+          </div>
+          <div className="router-config-row">
+            <div className="router-config-info">
+              <div className="router-config-label">监听端口</div>
+              <div className="router-config-hint">1024-65535，仅监听本机 127.0.0.1。</div>
+            </div>
+            <div className="router-config-control narrow">
+              <input className="router-input mono" value={port} onChange={(event) => setPort(event.target.value.replace(/\D/g, ''))} />
+            </div>
+          </div>
+          <div className="router-config-row">
+            <div className="router-config-info">
+              <div className="router-config-label">本地 API Key</div>
+              <div className="router-config-hint">客户端访问网关时使用；与上游 API Key 无关。</div>
+            </div>
+            <div className="router-config-control">
+              <div className="router-input-row">
+                <input className="router-input mono" value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
+                <CopyButton text={apiKey} label="复制" />
+                <button type="button" className="router-btn" onClick={() => void regenerate()}>
+                  <KeyRound size={14} />
+                  重新生成
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="router-config-row">
+            <div className="router-config-info">
+              <div className="router-config-label">上游代理 URL</div>
+              <div className="router-config-hint">HTTP(S) 代理；留空直连，支持 CONNECT 隧道。</div>
+            </div>
+            <div className="router-config-control">
+              <input
+                className="router-input mono"
+                value={proxyUrl}
+                onChange={(event) => setProxyUrl(event.target.value)}
+                placeholder="http://127.0.0.1:7890"
+              />
+            </div>
+          </div>
+          <div className="router-config-row">
+            <div className="router-config-info">
+              <div className="router-config-label">日志正文</div>
+              <div className="router-config-hint">关闭后只记录状态、耗时和 token，不落库 prompt / 回复正文。</div>
+            </div>
+            <div className="router-config-control">
+              <label className="router-check">
+                <input type="checkbox" checked={captureBodies} onChange={(event) => setCaptureBodies(event.target.checked)} />
+                保存请求 / 响应正文
+              </label>
+            </div>
+          </div>
         </div>
       </div>
 

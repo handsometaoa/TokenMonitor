@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { asRecord } from '../../shared/validation';
 import type {
   RouterBalanceConfig,
   RouterChannelHealth,
@@ -36,11 +37,9 @@ export function sessionKeyFrom(headers: Record<string, string | string[] | undef
     const text = Array.isArray(value) ? value[0] : value;
     if (typeof text === 'string' && text.trim()) return `${name}:${text.trim()}`;
   }
-  if (body && typeof body === 'object') {
-    const record = body as Record<string, unknown>;
-    const metadata = record.metadata && typeof record.metadata === 'object'
-      ? (record.metadata as Record<string, unknown>)
-      : {};
+  const record = asRecord(body);
+  if (record) {
+    const metadata = asRecord(record.metadata) ?? {};
     for (const value of [record.conversation_id, record.session_id, metadata.user_id, metadata.session_id]) {
       if (typeof value === 'string' && value.trim()) return `meta:${value.trim()}`;
     }
@@ -50,28 +49,24 @@ export function sessionKeyFrom(headers: Record<string, string | string[] | undef
 }
 
 function fingerprintBody(body: unknown): string | null {
-  if (!body || typeof body !== 'object') return null;
-  const record = body as Record<string, unknown>;
+  const record = asRecord(body);
+  if (!record) return null;
   let text = '';
   if (typeof record.input === 'string') text = record.input;
   if (!text && Array.isArray(record.messages)) {
     for (const message of record.messages) {
-      if (!message || typeof message !== 'object') continue;
-      const item = message as Record<string, unknown>;
-      if (item.role === 'user') {
-        if (typeof item.content === 'string') {
-          text = item.content;
-          break;
-        }
-        if (Array.isArray(item.content)) {
-          for (const part of item.content) {
-            if (part && typeof part === 'object') {
-              const block = part as Record<string, unknown>;
-              if (typeof block.text === 'string' && block.text) {
-                text = block.text;
-                break;
-              }
-            }
+      const item = asRecord(message);
+      if (!item || item.role !== 'user') continue;
+      if (typeof item.content === 'string') {
+        text = item.content;
+        break;
+      }
+      if (Array.isArray(item.content)) {
+        for (const part of item.content) {
+          const block = asRecord(part);
+          if (typeof block?.text === 'string' && block.text) {
+            text = block.text;
+            break;
           }
         }
       }
@@ -126,7 +121,8 @@ export class RouterBalancer {
       return true;
     });
     if (!config.enabled) {
-      return usable.length > 0 ? [usable[0]] : [];
+      const first = usable[0];
+      return first ? [first] : [];
     }
 
     const bound = config.sessionAffinity && sessionKey ? this.sessions.get(sessionKey) : null;
@@ -144,7 +140,7 @@ export class RouterBalancer {
       let ticket = Math.random() * total;
       let pickedIndex = pool.length - 1;
       for (let index = 0; index < pool.length; index += 1) {
-        ticket -= weights[index];
+        ticket -= weights[index] ?? 0;
         if (ticket <= 0) {
           pickedIndex = index;
           break;

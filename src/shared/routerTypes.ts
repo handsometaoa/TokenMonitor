@@ -146,6 +146,18 @@ export interface RouterUsageOverview {
   providers: RouterUsageGroup[];
   models: RouterUsageGroup[];
   series: RouterUsageSeries;
+  breakdown: RouterUsageBreakdown | null;
+}
+
+/** Estimated per-category token composition for a range (input side estimated from request bodies). */
+export interface RouterUsageBreakdown {
+  system: number;
+  tools: number;
+  user: number;
+  toolResults: number;
+  assistant: number;
+  reasoning: number;
+  reply: number;
 }
 
 export interface RouterActivityDay {

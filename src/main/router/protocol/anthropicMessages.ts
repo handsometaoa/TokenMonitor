@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { asRecord, parseJson } from '../../../shared/validation';
 import { SseParser, sseData } from './sse';
 import {
   type ApiUsage,
@@ -28,22 +29,24 @@ function parseSystem(value: unknown): string[] {
   if (typeof value === 'string') return value ? [value] : [];
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
-    if (!item || typeof item !== 'object') return [];
-    const block = item as Record<string, unknown>;
-    return block.type === 'text' && typeof block.text === 'string' ? [block.text] : [];
+    const block = asRecord(item);
+    return block?.type === 'text' && typeof block.text === 'string' ? [block.text] : [];
   });
 }
 
 function parseBlocks(value: unknown): Array<Record<string, unknown>> {
   if (typeof value === 'string') return value ? [{ type: 'text', text: value }] : [];
-  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object') : [];
+  return Array.isArray(value) ? value.flatMap((item) => {
+    const block = asRecord(item);
+    return block ? [block] : [];
+  }) : [];
 }
 
 function parseTools(value: unknown): ToolDefinition[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
-    if (!item || typeof item !== 'object') return [];
-    const tool = item as Record<string, unknown>;
+    const tool = asRecord(item);
+    if (!tool) return [];
     const name = stringValue(tool.name);
     if (!name) return [];
     return [{ name, description: stringValue(tool.description), parameters: tool.input_schema ?? { type: 'object', properties: {} } }];
@@ -51,8 +54,8 @@ function parseTools(value: unknown): ToolDefinition[] {
 }
 
 function parseToolChoice(value: unknown): Conversation['toolChoice'] {
-  if (!value || typeof value !== 'object') return null;
-  const choice = value as Record<string, unknown>;
+  const choice = asRecord(value);
+  if (!choice) return null;
   if (choice.type === 'auto') return 'auto';
   if (choice.type === 'any') return 'required';
   if (choice.type === 'tool') {
@@ -67,20 +70,20 @@ function parseRequest(body: Record<string, unknown>): Conversation {
   const system = parseSystem(body.system);
   const messages: ConversationMessage[] = [];
   for (const raw of body.messages) {
-    if (!raw || typeof raw !== 'object') continue;
-    const message = raw as Record<string, unknown>;
+    const message = asRecord(raw);
+    if (!message) continue;
     const role = message.role === 'assistant' ? 'assistant' : 'user';
     const parts: ConversationMessage['content'] = [];
     const toolCalls: ToolCall[] = [];
     for (const block of parseBlocks(message.content)) {
       if (block.type === 'text' && typeof block.text === 'string') {
         parts.push({ type: 'text', text: block.text });
-      } else if (block.type === 'image' && block.source && typeof block.source === 'object') {
-        const source = block.source as Record<string, unknown>;
-        if (source.type === 'base64' && typeof source.data === 'string') {
+      } else if (block.type === 'image') {
+        const source = asRecord(block.source);
+        if (source?.type === 'base64' && typeof source.data === 'string') {
           const media = stringValue(source.media_type) || 'image/png';
           parts.push({ type: 'image', url: `data:${media};base64,${source.data}` });
-        } else if (source.type === 'url' && typeof source.url === 'string') {
+        } else if (source?.type === 'url' && typeof source.url === 'string') {
           parts.push({ type: 'image', url: source.url });
         }
       } else if (block.type === 'tool_use') {
@@ -93,7 +96,7 @@ function parseRequest(body: Record<string, unknown>): Conversation {
           const content = typeof block.content === 'string'
             ? block.content
             : Array.isArray(block.content)
-              ? block.content.map((item) => (item && typeof item === 'object' ? stringValue((item as Record<string, unknown>).text) : '')).join('')
+              ? block.content.map((item) => stringValue(asRecord(item)?.text)).join('')
               : '';
           parts.push({ type: 'tool_result', result: { toolCallId: id, content } });
         }
@@ -101,7 +104,7 @@ function parseRequest(body: Record<string, unknown>): Conversation {
     }
     messages.push({ role, content: parts, toolCalls });
   }
-  const thinking = body.thinking && typeof body.thinking === 'object' ? (body.thinking as Record<string, unknown>) : {};
+  const thinking = asRecord(body.thinking) ?? {};
   const budget = numberValue(thinking.budget_tokens);
   return {
     stream: body.stream === true,
@@ -130,7 +133,7 @@ function buildRequest(conversation: Conversation, model: string): { body: unknow
       for (const call of message.toolCalls) {
         let input: unknown = {};
         try {
-          input = JSON.parse(call.arguments || '{}');
+          input = parseJson(call.arguments || '{}');
         } catch {
           input = {};
         }
@@ -201,7 +204,7 @@ function mapStopReason(value: unknown): FinishReason {
 }
 
 function usageOf(raw: unknown): ApiUsage {
-  const usage = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const usage = asRecord(raw) ?? {};
   return {
     inputTokens: numberValue(usage.input_tokens) ?? 0,
     outputTokens: numberValue(usage.output_tokens) ?? 0,
@@ -212,14 +215,14 @@ function usageOf(raw: unknown): ApiUsage {
 }
 
 function decodeResponse(payload: unknown): Completion {
-  const data = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+  const data = asRecord(payload) ?? {};
   const blocks = Array.isArray(data.content) ? data.content : [];
   const text: string[] = [];
   const thinking: string[] = [];
   const toolCalls: ToolCall[] = [];
   for (const raw of blocks) {
-    if (!raw || typeof raw !== 'object') continue;
-    const block = raw as Record<string, unknown>;
+    const block = asRecord(raw);
+    if (!block) continue;
     if (block.type === 'text' && typeof block.text === 'string') text.push(block.text);
     if (block.type === 'thinking' && typeof block.thinking === 'string') thinking.push(block.thinking);
     if (block.type === 'tool_use') {
@@ -261,25 +264,21 @@ function createStreamDecoder(onEvent: (event: StreamEvent) => void) {
   const handle = (message: { event: string | null; data: string }) => {
     let payload: Record<string, unknown>;
     try {
-      const parsed = JSON.parse(message.data) as unknown;
-      if (!parsed || typeof parsed !== 'object') return;
-      payload = parsed as Record<string, unknown>;
+      const record = asRecord(parseJson(message.data));
+      if (!record) return;
+      payload = record;
     } catch {
       return;
     }
     const type = message.event ?? stringValue(payload.type);
     if (type === 'message_start') {
-      const messageData = payload.message && typeof payload.message === 'object'
-        ? (payload.message as Record<string, unknown>)
-        : {};
+      const messageData = asRecord(payload.message) ?? {};
       usage = { ...usage, ...usageOf(messageData.usage) };
       return;
     }
     if (type === 'content_block_start') {
       const index = numberValue(payload.index) ?? 0;
-      const block = payload.content_block && typeof payload.content_block === 'object'
-        ? (payload.content_block as Record<string, unknown>)
-        : {};
+      const block = asRecord(payload.content_block) ?? {};
       if (block.type === 'tool_use') {
         const id = stringValue(block.id) || `call_${index}`;
         const name = stringValue(block.name);
@@ -290,9 +289,7 @@ function createStreamDecoder(onEvent: (event: StreamEvent) => void) {
     }
     if (type === 'content_block_delta') {
       const index = numberValue(payload.index) ?? 0;
-      const delta = payload.delta && typeof payload.delta === 'object'
-        ? (payload.delta as Record<string, unknown>)
-        : {};
+      const delta = asRecord(payload.delta) ?? {};
       if (delta.type === 'text_delta' && typeof delta.text === 'string') {
         onEvent({ type: 'text', text: delta.text });
       } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
@@ -313,9 +310,7 @@ function createStreamDecoder(onEvent: (event: StreamEvent) => void) {
       return;
     }
     if (type === 'message_delta') {
-      const delta = payload.delta && typeof payload.delta === 'object'
-        ? (payload.delta as Record<string, unknown>)
-        : {};
+      const delta = asRecord(payload.delta) ?? {};
       if (delta.stop_reason) reason = mapStopReason(delta.stop_reason);
       if (payload.usage) {
         const next = usageOf(payload.usage);
@@ -331,9 +326,7 @@ function createStreamDecoder(onEvent: (event: StreamEvent) => void) {
       return;
     }
     if (type === 'error') {
-      const error = payload.error && typeof payload.error === 'object'
-        ? (payload.error as Record<string, unknown>)
-        : {};
+      const error = asRecord(payload.error) ?? {};
       onEvent({ type: 'error', message: stringValue(error.message) || 'Upstream error' });
       reason = 'error';
       finish();
@@ -358,7 +351,7 @@ function encodeCompletion(model: string, completion: Completion): unknown {
   for (const call of completion.toolCalls) {
     let input: unknown = {};
     try {
-      input = JSON.parse(call.arguments || '{}');
+      input = parseJson(call.arguments || '{}');
     } catch {
       input = {};
     }

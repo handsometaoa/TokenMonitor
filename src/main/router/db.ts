@@ -2,6 +2,22 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { z } from 'zod';
+import {
+  asRecord,
+  finiteNumber,
+  nonEmptyString,
+  parseJson,
+  safeInteger,
+  stringValue,
+} from '../../shared/validation';
+import {
+  routerBalanceConfigSchema,
+  routerProviderKindSchema,
+  routerProtocolSchema,
+  routerQuotaSnapshotSchema,
+  routerServiceConfigSchema,
+} from '../../shared/routerSchemas';
 import type {
   RouterActivityDay,
   RouterBalanceConfig,
@@ -18,13 +34,14 @@ import type {
   RouterQuotaSnapshot,
   RouterServiceConfig,
   RouterUsageOverview,
+  RouterUsageBreakdown,
   RouterUsageRange,
   RouterUsageSeries,
   RouterUsageTotals,
 } from '../../shared/routerTypes';
 import { DEFAULT_ROUTER_BALANCE, DEFAULT_ROUTER_PORT } from '../../shared/routerTypes';
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 export interface RouterProviderRow {
   id: string;
@@ -51,62 +68,202 @@ export interface RouterRoute {
   modelEnabled: boolean;
 }
 
-interface ProviderDbRow {
-  id: string;
-  name: string;
-  protocol: string;
-  kind: string;
-  base_url: string;
-  quota_strategy_id: string | null;
-  strategy_config: string | null;
-  enabled: number;
-  archived_at: number | null;
-  created_at: number;
-  updated_at: number;
+const integerColumn = z.preprocess((value) => safeInteger(value), z.number().int());
+const nullableIntegerColumn = integerColumn.nullable();
+const flagColumn = z.preprocess((value) => {
+  const integer = safeInteger(value);
+  return integer === 0 ? false : integer === 1 ? true : null;
+}, z.boolean());
+const textColumn = z.string();
+const nullableTextColumn = textColumn.nullable();
+
+const providerRowSchema = z.object({
+  id: textColumn,
+  name: textColumn,
+  protocol: routerProtocolSchema,
+  kind: routerProviderKindSchema,
+  base_url: textColumn,
+  quota_strategy_id: nullableTextColumn,
+  strategy_config: nullableTextColumn,
+  enabled: flagColumn,
+  archived_at: nullableIntegerColumn,
+  created_at: integerColumn,
+  updated_at: integerColumn,
+});
+
+const modelRowSchema = z.object({
+  id: textColumn,
+  provider_id: textColumn,
+  public_name: textColumn,
+  upstream_name: textColumn,
+  enabled: flagColumn,
+  archived_at: nullableIntegerColumn,
+  created_at: integerColumn,
+  provider_name: textColumn,
+  provider_protocol: routerProtocolSchema,
+});
+
+const logRowSchema = z.object({
+  id: integerColumn,
+  request_id: textColumn,
+  started_at: integerColumn,
+  finished_at: nullableIntegerColumn,
+  public_model: textColumn,
+  provider_name: textColumn,
+  upstream_model: textColumn,
+  provider_id: nullableTextColumn,
+  model_id: nullableTextColumn,
+  client: nullableTextColumn,
+  path: textColumn,
+  status: nullableIntegerColumn,
+  duration_ms: nullableIntegerColumn,
+  ttft_ms: nullableIntegerColumn,
+  stream: flagColumn,
+  prompt_tokens: integerColumn,
+  completion_tokens: integerColumn,
+  reasoning_tokens: integerColumn,
+  cache_read_tokens: integerColumn,
+  cache_write_tokens: integerColumn,
+  unrecognized_tokens: integerColumn,
+  total_tokens: integerColumn,
+  token_breakdown: nullableTextColumn,
+  error: nullableTextColumn,
+  request_body: nullableTextColumn,
+  request_headers: nullableTextColumn,
+  response_body: nullableTextColumn,
+  response_headers: nullableTextColumn,
+  retry_trace: nullableTextColumn,
+  aggregated: flagColumn,
+});
+
+const routeRowSchema = z.object({
+  model_id: textColumn,
+  provider_id: textColumn,
+  public_name: textColumn,
+  upstream_name: textColumn,
+  provider_name: textColumn,
+  provider_protocol: routerProtocolSchema,
+  model_enabled: flagColumn,
+  provider_enabled: flagColumn,
+  model_archived: nullableIntegerColumn,
+  provider_archived: nullableIntegerColumn,
+});
+
+const usageRowSchema = z.object({
+  date: textColumn.optional(),
+  hour_key: textColumn.optional(),
+  provider_name: textColumn,
+  public_model: textColumn,
+  request_count: integerColumn,
+  success_count: integerColumn,
+  fail_count: integerColumn,
+  duration_ms: integerColumn,
+  ttft_ms: integerColumn,
+  ttft_samples: integerColumn,
+  generation_ms: integerColumn,
+  prompt_tokens: integerColumn,
+  completion_tokens: integerColumn,
+  reasoning_tokens: integerColumn,
+  cache_read_tokens: integerColumn,
+  cache_write_tokens: integerColumn,
+  unrecognized_tokens: integerColumn,
+  total_tokens: integerColumn,
+});
+
+const quotaSnapshotRowSchema = z.object({
+  provider_id: textColumn,
+  snapshot: nullableTextColumn,
+  error: nullableTextColumn,
+  queried_at: integerColumn,
+});
+
+const countRowSchema = z.object({ n: integerColumn });
+const settingRowSchema = z.object({ value: textColumn });
+const pendingLogRowSchema = z.object({ request_id: textColumn, started_at: integerColumn });
+const activityRowSchema = z.object({
+  date: textColumn,
+  request_count: nullableIntegerColumn,
+  total_tokens: nullableIntegerColumn,
+});
+const flowRowSchema = z.object({
+  client_key: textColumn,
+  provider_name: textColumn,
+  request_count: integerColumn,
+});
+const breakdownRowSchema = z.object({
+  system: nullableIntegerColumn,
+  tools: nullableIntegerColumn,
+  user: nullableIntegerColumn,
+  toolResults: nullableIntegerColumn,
+  assistant: nullableIntegerColumn,
+  reasoning: nullableIntegerColumn,
+  reply: nullableIntegerColumn,
+});
+const tableInfoRowSchema = z.object({
+  cid: integerColumn,
+  name: textColumn,
+  type: textColumn,
+  notnull: integerColumn,
+  dflt_value: z.unknown().nullable(),
+  pk: integerColumn,
+});
+
+type ProviderDbRow = z.infer<typeof providerRowSchema>;
+type ModelDbRow = z.infer<typeof modelRowSchema>;
+type LogDbRow = z.infer<typeof logRowSchema>;
+
+function parseRow<T>(schema: z.ZodType<T>, value: unknown): T | null {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
-interface ModelDbRow {
-  id: string;
-  provider_id: string;
-  public_name: string;
-  upstream_name: string;
-  enabled: number;
-  archived_at: number | null;
-  created_at: number;
-  provider_name?: string;
-  provider_protocol?: string;
+function parseRows<T>(schema: z.ZodType<T>, values: unknown[]): T[] {
+  const rows: T[] = [];
+  for (const value of values) {
+    const row = parseRow(schema, value);
+    if (row) rows.push(row);
+  }
+  return rows;
 }
 
-interface LogDbRow {
-  id: number;
-  request_id: string;
-  started_at: number;
-  finished_at: number | null;
-  public_model: string;
-  provider_name: string;
-  upstream_model: string;
-  provider_id: string | null;
-  model_id: string | null;
-  client: string | null;
-  path: string;
-  status: number | null;
-  duration_ms: number | null;
-  ttft_ms: number | null;
-  stream: number;
-  prompt_tokens: number;
-  completion_tokens: number;
-  reasoning_tokens: number;
-  cache_read_tokens: number;
-  cache_write_tokens: number;
-  unrecognized_tokens: number;
-  total_tokens: number;
-  error: string | null;
-  request_body: string | null;
-  request_headers: string | null;
-  response_body: string | null;
-  response_headers: string | null;
-  retry_trace: string | null;
-  aggregated: number;
+function mapProvider(row: ProviderDbRow): RouterProviderRow {
+  return {
+    id: row.id,
+    name: row.name,
+    protocol: row.protocol,
+    kind: row.kind,
+    baseUrl: row.base_url,
+    quotaStrategyId: row.quota_strategy_id,
+    strategyConfig: parseConfig(row.strategy_config),
+    enabled: row.enabled,
+    archivedAt: row.archived_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapModel(row: ModelDbRow): RouterModelChannel {
+  return {
+    id: row.id,
+    providerId: row.provider_id,
+    providerName: row.provider_name,
+    providerProtocol: row.provider_protocol,
+    publicName: row.public_name,
+    upstreamName: row.upstream_name,
+    enabled: row.enabled,
+    archivedAt: row.archived_at,
+    createdAt: row.created_at,
+  };
+}
+
+function parseQuotaSnapshot(value: string | null): RouterQuotaSnapshot | null {
+  if (value === null) return null;
+  try {
+    const parsed = routerQuotaSnapshotSchema.safeParse(parseJson(value));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }
 
 const EMPTY_TOTALS: RouterUsageTotals = {
@@ -129,11 +286,11 @@ const EMPTY_TOTALS: RouterUsageTotals = {
 function parseConfig(value: string | null): Record<string, string> {
   if (!value) return {};
   try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const parsed = asRecord(parseJson(value));
+    if (!parsed) return {};
     return Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>)
-        .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+      Object.entries(parsed)
+        .filter((entry): entry is [string, string] => stringValue(entry[1]) !== null)
         .map(([key, item]) => [key, item]),
     );
   } catch {
@@ -185,7 +342,12 @@ export class RouterRepository {
     mkdirSync(baseDir, { recursive: true });
     this.db = new DatabaseSync(join(baseDir, 'router.db'));
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
-    this.migrate();
+    try {
+      this.migrate();
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
   }
 
   close(): void {
@@ -197,30 +359,44 @@ export class RouterRepository {
   }
 
   private migrate(): void {
-    const version = Number((this.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version ?? 0);
-    if (version >= SCHEMA_VERSION) return;
-    if (version === 1) {
-      // v1 → v2: add TTFT columns to existing tables.
-      this.db.exec(`
-        ALTER TABLE request_logs ADD COLUMN ttft_ms INTEGER;
-        ALTER TABLE usage_daily ADD COLUMN ttft_ms INTEGER NOT NULL DEFAULT 0;
-        ALTER TABLE usage_daily ADD COLUMN ttft_samples INTEGER NOT NULL DEFAULT 0;
-        ALTER TABLE usage_hourly ADD COLUMN ttft_ms INTEGER NOT NULL DEFAULT 0;
-        ALTER TABLE usage_hourly ADD COLUMN ttft_samples INTEGER NOT NULL DEFAULT 0;
-      `);
+    const versionRow = parseRow(z.object({ user_version: integerColumn }), this.db.prepare('PRAGMA user_version').get());
+    if (!versionRow || versionRow.user_version < 0) {
+      throw new Error('Invalid router database schema version.');
     }
-    if (version >= 1 && version < 3) {
-      // v2 → v3: track generation time (duration minus TTFT) for output tok/s.
-      // Only for existing databases; fresh ones get the columns from CREATE TABLE below.
-      this.db.exec(`
-        ALTER TABLE usage_daily ADD COLUMN generation_ms INTEGER NOT NULL DEFAULT 0;
-        ALTER TABLE usage_hourly ADD COLUMN generation_ms INTEGER NOT NULL DEFAULT 0;
-      `);
+    const version = versionRow.user_version;
+    if (version > SCHEMA_VERSION) {
+      throw new Error(`Unsupported router database schema version: ${version}`);
     }
-    if (version >= 1) {
+
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.createSchema();
+      this.addColumnIfMissing('request_logs', 'ttft_ms', 'INTEGER');
+      this.addColumnIfMissing('request_logs', 'token_breakdown', 'TEXT');
+      for (const table of ['usage_daily', 'usage_hourly'] as const) {
+        this.addColumnIfMissing(table, 'ttft_ms', 'INTEGER NOT NULL DEFAULT 0');
+        this.addColumnIfMissing(table, 'ttft_samples', 'INTEGER NOT NULL DEFAULT 0');
+        this.addColumnIfMissing(table, 'generation_ms', 'INTEGER NOT NULL DEFAULT 0');
+      }
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
-      return;
+      this.db.exec('COMMIT');
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        // Preserve the migration error.
+      }
+      throw error;
     }
+  }
+
+  private addColumnIfMissing(table: string, column: string, definition: string): void {
+    const columns = parseRows(tableInfoRowSchema, this.db.prepare(`PRAGMA table_info(${table})`).all());
+    if (columns.some((row) => row.name === column)) return;
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+  }
+
+  private createSchema(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS providers (
         id TEXT PRIMARY KEY,
@@ -279,6 +455,7 @@ export class RouterRepository {
         cache_write_tokens INTEGER NOT NULL DEFAULT 0,
         unrecognized_tokens INTEGER NOT NULL DEFAULT 0,
         total_tokens INTEGER NOT NULL DEFAULT 0,
+        token_breakdown TEXT,
         request_body TEXT,
         request_headers TEXT,
         response_body TEXT,
@@ -343,13 +520,11 @@ export class RouterRepository {
         error TEXT,
         queried_at INTEGER NOT NULL
       );
-
-      PRAGMA user_version = ${SCHEMA_VERSION};
     `);
   }
 
   getSetting(key: string): string | null {
-    const row = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+    const row = parseRow(settingRowSchema, this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key));
     return row?.value ?? null;
   }
 
@@ -360,22 +535,34 @@ export class RouterRepository {
   }
 
   getServiceConfig(): RouterServiceConfig {
+    const defaults: RouterServiceConfig = {
+      enabled: false,
+      port: DEFAULT_ROUTER_PORT,
+      apiKey: '',
+      proxyUrl: '',
+      captureBodies: true,
+    };
     const raw = this.getSetting('router.service');
     if (raw) {
       try {
-        const parsed = JSON.parse(raw) as Partial<RouterServiceConfig>;
-        return {
-          enabled: parsed.enabled !== false,
-          port: Number(parsed.port) || DEFAULT_ROUTER_PORT,
-          apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey : '',
-          proxyUrl: typeof parsed.proxyUrl === 'string' ? parsed.proxyUrl : '',
-          captureBodies: parsed.captureBodies !== false,
+        const value = asRecord(parseJson(raw));
+        if (!value) return defaults;
+        // Keep the legacy coercions: only literal false disables flags, numeric
+        // strings are accepted for the port, and zero/NaN selects the default.
+        const candidate: RouterServiceConfig = {
+          enabled: value.enabled !== false,
+          port: Number(value.port) || DEFAULT_ROUTER_PORT,
+          apiKey: stringValue(value.apiKey) ?? '',
+          proxyUrl: stringValue(value.proxyUrl) ?? '',
+          captureBodies: value.captureBodies !== false,
         };
+        const parsed = routerServiceConfigSchema.safeParse(candidate);
+        return parsed.success ? parsed.data : defaults;
       } catch {
         // Fall through to defaults.
       }
     }
-    return { enabled: false, port: DEFAULT_ROUTER_PORT, apiKey: '', proxyUrl: '', captureBodies: true };
+    return defaults;
   }
 
   setServiceConfig(config: RouterServiceConfig): void {
@@ -386,13 +573,16 @@ export class RouterRepository {
     const raw = this.getSetting('router.balancing');
     if (raw) {
       try {
-        const parsed = JSON.parse(raw) as Partial<RouterBalanceConfig>;
-        return {
-          enabled: parsed.enabled !== false,
-          sessionAffinity: parsed.sessionAffinity !== false,
-          quotaGuard: parsed.quotaGuard !== false,
-          maxAttempts: Math.min(5, Math.max(1, Number(parsed.maxAttempts) || 3)),
+        const value = asRecord(parseJson(raw));
+        if (!value) return { ...DEFAULT_ROUTER_BALANCE };
+        const candidate: RouterBalanceConfig = {
+          enabled: value.enabled !== false,
+          sessionAffinity: value.sessionAffinity !== false,
+          quotaGuard: value.quotaGuard !== false,
+          maxAttempts: Math.min(5, Math.max(1, Number(value.maxAttempts) || 3)),
         };
+        const parsed = routerBalanceConfigSchema.safeParse(candidate);
+        return parsed.success ? parsed.data : { ...DEFAULT_ROUTER_BALANCE };
       } catch {
         // Fall through.
       }
@@ -405,40 +595,18 @@ export class RouterRepository {
   }
 
   listProviders(includeArchived = false): RouterProviderRow[] {
-    const rows = this.db
-      .prepare(`SELECT * FROM providers ${includeArchived ? '' : 'WHERE archived_at IS NULL'} ORDER BY created_at`)
-      .all() as unknown as ProviderDbRow[];
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      protocol: row.protocol as RouterProtocol,
-      kind: row.kind as RouterProviderKind,
-      baseUrl: row.base_url,
-      quotaStrategyId: row.quota_strategy_id,
-      strategyConfig: parseConfig(row.strategy_config),
-      enabled: Boolean(row.enabled),
-      archivedAt: row.archived_at,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    const rows = parseRows(
+      providerRowSchema,
+      this.db
+        .prepare(`SELECT * FROM providers ${includeArchived ? '' : 'WHERE archived_at IS NULL'} ORDER BY created_at`)
+        .all(),
+    );
+    return rows.map(mapProvider);
   }
 
   getProvider(id: string): RouterProviderRow | null {
-    const row = this.db.prepare('SELECT * FROM providers WHERE id = ?').get(id) as ProviderDbRow | undefined;
-    if (!row) return null;
-    return {
-      id: row.id,
-      name: row.name,
-      protocol: row.protocol as RouterProtocol,
-      kind: row.kind as RouterProviderKind,
-      baseUrl: row.base_url,
-      quotaStrategyId: row.quota_strategy_id,
-      strategyConfig: parseConfig(row.strategy_config),
-      enabled: Boolean(row.enabled),
-      archivedAt: row.archived_at,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
+    const row = parseRow(providerRowSchema, this.db.prepare('SELECT * FROM providers WHERE id = ?').get(id));
+    return row ? mapProvider(row) : null;
   }
 
   saveProvider(input: RouterProviderInput): RouterProviderRow {
@@ -481,13 +649,25 @@ export class RouterRepository {
           now,
         );
     }
-    return this.getProvider(id)!;
+    const saved = this.getProvider(id);
+    if (!saved) throw new Error('Provider could not be read after saving.');
+    return saved;
   }
 
   setProviderArchived(id: string, archived: boolean): void {
     const now = Date.now();
+    const existing = this.getProvider(id);
     this.db.prepare('UPDATE providers SET archived_at = ?, updated_at = ? WHERE id = ?').run(archived ? now : null, now, id);
-    if (archived) this.db.prepare('UPDATE models SET archived_at = ? WHERE provider_id = ?').run(now, id);
+    if (archived) {
+      // Cascade so archived providers no longer expose their channels.
+      this.db.prepare('UPDATE models SET archived_at = ? WHERE provider_id = ? AND archived_at IS NULL').run(now, id);
+      return;
+    }
+    // Restore only channels that were archived together with the provider; keep
+    // channels archived manually (or earlier) as they were.
+    if (existing?.archivedAt) {
+      this.db.prepare('UPDATE models SET archived_at = NULL WHERE provider_id = ? AND archived_at = ?').run(id, existing.archivedAt);
+    }
   }
 
   deleteProvider(id: string): void {
@@ -496,52 +676,37 @@ export class RouterRepository {
 
   listModelGroups(includeArchived = false): Array<{ publicName: string; channels: RouterModelChannel[] }> {
     const where = includeArchived ? '' : 'WHERE m.archived_at IS NULL AND p.archived_at IS NULL';
-    const rows = this.db
-      .prepare(`
-        SELECT m.*, p.name AS provider_name, p.protocol AS provider_protocol
-        FROM models m JOIN providers p ON p.id = m.provider_id
-        ${where}
-        ORDER BY m.public_name, m.created_at
-      `)
-      .all() as unknown as ModelDbRow[];
+    const rows = parseRows(
+      modelRowSchema,
+      this.db
+        .prepare(`
+          SELECT m.*, p.name AS provider_name, p.protocol AS provider_protocol
+          FROM models m JOIN providers p ON p.id = m.provider_id
+          ${where}
+          ORDER BY m.public_name, m.created_at
+        `)
+        .all(),
+    );
     const groups = new Map<string, RouterModelChannel[]>();
     for (const row of rows) {
       const list = groups.get(row.public_name) ?? [];
-      list.push({
-        id: row.id,
-        providerId: row.provider_id,
-        providerName: row.provider_name ?? '',
-        providerProtocol: (row.provider_protocol ?? 'openai') as RouterProtocol,
-        publicName: row.public_name,
-        upstreamName: row.upstream_name,
-        enabled: Boolean(row.enabled),
-        archivedAt: row.archived_at,
-        createdAt: row.created_at,
-      });
+      list.push(mapModel(row));
       groups.set(row.public_name, list);
     }
     return [...groups.entries()].map(([publicName, channels]) => ({ publicName, channels }));
   }
 
   getModel(id: string): RouterModelChannel | null {
-    const row = this.db
-      .prepare(`
-        SELECT m.*, p.name AS provider_name, p.protocol AS provider_protocol
-        FROM models m JOIN providers p ON p.id = m.provider_id WHERE m.id = ?
-      `)
-      .get(id) as ModelDbRow | undefined;
-    if (!row) return null;
-    return {
-      id: row.id,
-      providerId: row.provider_id,
-      providerName: row.provider_name ?? '',
-      providerProtocol: (row.provider_protocol ?? 'openai') as RouterProtocol,
-      publicName: row.public_name,
-      upstreamName: row.upstream_name,
-      enabled: Boolean(row.enabled),
-      archivedAt: row.archived_at,
-      createdAt: row.created_at,
-    };
+    const row = parseRow(
+      modelRowSchema,
+      this.db
+        .prepare(`
+          SELECT m.*, p.name AS provider_name, p.protocol AS provider_protocol
+          FROM models m JOIN providers p ON p.id = m.provider_id WHERE m.id = ?
+        `)
+        .get(id),
+    );
+    return row ? mapModel(row) : null;
   }
 
   saveModel(input: RouterModelInput): RouterModelChannel {
@@ -550,13 +715,17 @@ export class RouterRepository {
       this.db
         .prepare('UPDATE models SET provider_id = ?, public_name = ?, upstream_name = ?, enabled = ? WHERE id = ?')
         .run(input.providerId, input.publicName, input.upstreamName, input.enabled ? 1 : 0, input.id);
-      return this.getModel(input.id)!;
+      const saved = this.getModel(input.id);
+      if (!saved) throw new Error('Model could not be read after saving.');
+      return saved;
     }
     const id = randomUUID();
     this.db
       .prepare('INSERT INTO models (id, provider_id, public_name, upstream_name, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(id, input.providerId, input.publicName, input.upstreamName, input.enabled ? 1 : 0, now);
-    return this.getModel(id)!;
+    const saved = this.getModel(id);
+    if (!saved) throw new Error('Model could not be read after saving.');
+    return saved;
   }
 
   setModelArchived(id: string, archived: boolean): void {
@@ -564,8 +733,11 @@ export class RouterRepository {
   }
 
   renameModelGroup(from: string, to: string): void {
-    const target = this.db.prepare('SELECT count(*) AS n FROM models WHERE public_name = ?').get(to) as { n: number };
-    if (Number(target.n) > 0) throw new Error('目标模型名已存在');
+    const target = parseRow(
+      countRowSchema,
+      this.db.prepare('SELECT count(*) AS n FROM models WHERE public_name = ?').get(to),
+    );
+    if ((target?.n ?? 0) > 0) throw new Error('目标模型名已存在');
     this.db.exec('BEGIN');
     try {
       this.db.prepare('UPDATE models SET public_name = ? WHERE public_name = ?').run(to, from);
@@ -586,47 +758,42 @@ export class RouterRepository {
   }
 
   findRoutes(publicName: string): RouterRoute[] {
-    const rows = this.db
-      .prepare(`
-        SELECT m.id AS model_id, m.provider_id, m.public_name, m.upstream_name,
-          p.name AS provider_name, p.protocol AS provider_protocol,
-          m.enabled AS model_enabled, p.enabled AS provider_enabled,
-          m.archived_at AS model_archived, p.archived_at AS provider_archived
-        FROM models m JOIN providers p ON p.id = m.provider_id
-        WHERE m.public_name = ?
-        ORDER BY m.created_at
-      `)
-      .all(publicName) as unknown as Array<{
-      model_id: string;
-      provider_id: string;
-      public_name: string;
-      upstream_name: string;
-      provider_name: string;
-      provider_protocol: string;
-      model_enabled: number;
-      provider_enabled: number;
-      model_archived: number | null;
-      provider_archived: number | null;
-    }>;
+    const rows = parseRows(
+      routeRowSchema,
+      this.db
+        .prepare(`
+          SELECT m.id AS model_id, m.provider_id, m.public_name, m.upstream_name,
+            p.name AS provider_name, p.protocol AS provider_protocol,
+            m.enabled AS model_enabled, p.enabled AS provider_enabled,
+            m.archived_at AS model_archived, p.archived_at AS provider_archived
+          FROM models m JOIN providers p ON p.id = m.provider_id
+          WHERE m.public_name = ?
+          ORDER BY m.created_at
+        `)
+        .all(publicName),
+    );
     return rows
-      .filter((row) => !row.model_archived && !row.provider_archived)
+      .filter((row) => row.model_archived === null && row.provider_archived === null)
       .map((row) => ({
         modelId: row.model_id,
         providerId: row.provider_id,
         providerName: row.provider_name,
-        providerProtocol: row.provider_protocol as RouterProtocol,
+        providerProtocol: row.provider_protocol,
         publicName: row.public_name,
         upstreamModel: row.upstream_name,
-        providerEnabled: Boolean(row.provider_enabled),
-        modelEnabled: Boolean(row.model_enabled),
+        providerEnabled: row.provider_enabled,
+        modelEnabled: row.model_enabled,
       }));
   }
 
   countModels(providerId: string): number {
-    const row = this.db
-      .prepare('SELECT count(*) AS n FROM models WHERE provider_id = ? AND archived_at IS NULL')
-      .get(providerId) as { n: number };
-    return Number(row.n) || 0;
+    const row = parseRow(
+      countRowSchema,
+      this.db
+        .prepare('SELECT count(*) AS n FROM models WHERE provider_id = ? AND archived_at IS NULL')
+        .get(providerId),
+    );
+    return row?.n ?? 0;
   }
 
   startLog(input: {
@@ -673,6 +840,13 @@ export class RouterRepository {
     status: number;
     stream: boolean;
     ttftMs?: number | null;
+    breakdown?: {
+      system: number;
+      tools: number;
+      user: number;
+      toolResults: number;
+      assistant: number;
+    } | null;
     promptTokens: number;
     completionTokens: number;
     reasoningTokens: number;
@@ -685,18 +859,27 @@ export class RouterRepository {
     error: string | null;
     retryTrace: string | null;
   }): void {
-    const row = this.db
-      .prepare('SELECT * FROM request_logs WHERE request_id = ?')
-      .get(input.requestId) as LogDbRow | undefined;
+    const row = parseRow(
+      logRowSchema,
+      this.db.prepare('SELECT * FROM request_logs WHERE request_id = ?').get(input.requestId),
+    );
     if (!row) return;
     const finishedAt = Date.now();
     const durationMs = Math.max(0, finishedAt - row.started_at);
     const ttftMs = input.ttftMs != null ? Math.max(0, Math.round(input.ttftMs)) : null;
+    // Token composition: output side exact from usage; input side estimated by the gateway.
+    const tokenBreakdown = input.breakdown
+      ? JSON.stringify({
+          ...input.breakdown,
+          reasoning: input.status >= 200 && input.status < 300 ? input.reasoningTokens : 0,
+          reply: Math.max(0, (input.status >= 200 && input.status < 300 ? input.completionTokens : 0) - (input.status >= 200 && input.status < 300 ? input.reasoningTokens : 0)),
+        })
+      : null;
     this.db
       .prepare(`
         UPDATE request_logs SET finished_at = ?, status = ?, duration_ms = ?, ttft_ms = ?, stream = ?,
           prompt_tokens = ?, completion_tokens = ?, reasoning_tokens = ?, cache_read_tokens = ?,
-          cache_write_tokens = ?, unrecognized_tokens = ?, total_tokens = ?,
+          cache_write_tokens = ?, unrecognized_tokens = ?, total_tokens = ?, token_breakdown = ?,
           response_body = ?, response_headers = ?, error = ?, retry_trace = ?, aggregated = 1
         WHERE request_id = ?
       `)
@@ -713,6 +896,7 @@ export class RouterRepository {
         input.cacheWriteTokens,
         input.unrecognizedTokens,
         input.totalTokens,
+        tokenBreakdown,
         input.responseBody,
         input.responseHeaders,
         input.error,
@@ -805,10 +989,10 @@ export class RouterRepository {
   }
 
   markPendingInterrupted(): void {
-    const rows = this.db.prepare('SELECT request_id, started_at FROM request_logs WHERE finished_at IS NULL').all() as unknown as Array<{
-      request_id: string;
-      started_at: number;
-    }>;
+    const rows = parseRows(
+      pendingLogRowSchema,
+      this.db.prepare('SELECT request_id, started_at FROM request_logs WHERE finished_at IS NULL').all(),
+    );
     for (const row of rows) {
       this.finishLog({
         requestId: row.request_id,
@@ -846,7 +1030,7 @@ export class RouterRepository {
   }
 
   getLog(id: number): RouterLogEntry | null {
-    const row = this.db.prepare('SELECT * FROM request_logs WHERE id = ?').get(id) as LogDbRow | undefined;
+    const row = parseRow(logRowSchema, this.db.prepare('SELECT * FROM request_logs WHERE id = ?').get(id));
     return row ? this.mapLog(row) : null;
   }
 
@@ -869,13 +1053,17 @@ export class RouterRepository {
       params.push(needle, needle, needle);
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const total = Number(
-      (this.db.prepare(`SELECT count(*) AS n FROM request_logs ${where}`).get(...params) as { n: number }).n,
+    const count = parseRow(
+      countRowSchema,
+      this.db.prepare(`SELECT count(*) AS n FROM request_logs ${where}`).get(...params),
     );
-    const rows = this.db
-      .prepare(`SELECT * FROM request_logs ${where} ORDER BY started_at DESC LIMIT ? OFFSET ?`)
-      .all(...params, limit, offset) as unknown as LogDbRow[];
-    return { items: rows.map((row) => this.mapLog(row)), total };
+    const rows = parseRows(
+      logRowSchema,
+      this.db
+        .prepare(`SELECT * FROM request_logs ${where} ORDER BY started_at DESC LIMIT ? OFFSET ?`)
+        .all(...params, limit, offset),
+    );
+    return { items: rows.map((row) => this.mapLog(row)), total: count?.n ?? 0 };
   }
 
   private mapLog(row: LogDbRow): RouterLogEntry {
@@ -892,7 +1080,7 @@ export class RouterRepository {
       status: row.status,
       durationMs: row.duration_ms,
       ttftMs: row.ttft_ms,
-      stream: Boolean(row.stream),
+      stream: row.stream,
       promptTokens: row.prompt_tokens,
       completionTokens: row.completion_tokens,
       reasoningTokens: row.reasoning_tokens,
@@ -922,47 +1110,76 @@ export class RouterRepository {
     const startKey = useHourly ? localHourKey(startTs) : localDayKey(startTs);
     const table = useHourly ? 'usage_hourly' : 'usage_daily';
     const keyColumn = useHourly ? 'hour_key' : 'date';
-    const rows = this.db
-      .prepare(`SELECT * FROM ${table} WHERE ${keyColumn} >= ? ORDER BY ${keyColumn}`)
-      .all(startKey) as unknown as Array<Record<string, unknown>>;
+    const rows = parseRows(
+      usageRowSchema,
+      this.db.prepare(`SELECT * FROM ${table} WHERE ${keyColumn} >= ? ORDER BY ${keyColumn}`).all(startKey),
+    );
 
     const totals = emptyTotals();
     const providers = new Map<string, RouterUsageTotals>();
     const models = new Map<string, RouterUsageTotals>();
     const buckets = new Map<string, RouterUsageTotals>();
     for (const row of rows) {
+      const bucketKey = nonEmptyString(row[keyColumn]);
+      if (!bucketKey) continue;
       const totalsRow: RouterUsageTotals = {
-        requestCount: Number(row.request_count) || 0,
-        successCount: Number(row.success_count) || 0,
-        failCount: Number(row.fail_count) || 0,
-        durationMs: Number(row.duration_ms) || 0,
-        ttftMs: Number(row.ttft_ms) || 0,
-        ttftSamples: Number(row.ttft_samples) || 0,
-        generationMs: Number(row.generation_ms) || 0,
-        promptTokens: Number(row.prompt_tokens) || 0,
-        completionTokens: Number(row.completion_tokens) || 0,
-        reasoningTokens: Number(row.reasoning_tokens) || 0,
-        cacheReadTokens: Number(row.cache_read_tokens) || 0,
-        cacheWriteTokens: Number(row.cache_write_tokens) || 0,
-        unrecognizedTokens: Number(row.unrecognized_tokens) || 0,
-        totalTokens: Number(row.total_tokens) || 0,
+        requestCount: row.request_count,
+        successCount: row.success_count,
+        failCount: row.fail_count,
+        durationMs: row.duration_ms,
+        ttftMs: row.ttft_ms,
+        ttftSamples: row.ttft_samples,
+        generationMs: row.generation_ms,
+        promptTokens: row.prompt_tokens,
+        completionTokens: row.completion_tokens,
+        reasoningTokens: row.reasoning_tokens,
+        cacheReadTokens: row.cache_read_tokens,
+        cacheWriteTokens: row.cache_write_tokens,
+        unrecognizedTokens: row.unrecognized_tokens,
+        totalTokens: row.total_tokens,
       };
       addTotals(totals, totalsRow);
-      const providerKey = String(row.provider_name ?? '');
-      const modelKey = String(row.public_model ?? '');
+      const providerKey = row.provider_name;
+      const modelKey = row.public_model;
       const providerTotals = providers.get(providerKey) ?? emptyTotals();
       addTotals(providerTotals, totalsRow);
       providers.set(providerKey, providerTotals);
       const modelTotals = models.get(modelKey) ?? emptyTotals();
       addTotals(modelTotals, totalsRow);
       models.set(modelKey, modelTotals);
-      const bucketKey = String(row[keyColumn] ?? '');
       const bucket = buckets.get(bucketKey) ?? emptyTotals();
       addTotals(bucket, totalsRow);
       buckets.set(bucketKey, bucket);
     }
 
     const series = this.buildSeries(range, buckets, now);
+
+    const rawBreakdownRow = this.db
+      .prepare(
+        `SELECT
+          SUM(CAST(json_extract(token_breakdown,'$.system') AS INTEGER)) AS system,
+          SUM(CAST(json_extract(token_breakdown,'$.tools') AS INTEGER)) AS tools,
+          SUM(CAST(json_extract(token_breakdown,'$.user') AS INTEGER)) AS user,
+          SUM(CAST(json_extract(token_breakdown,'$.toolResults') AS INTEGER)) AS toolResults,
+          SUM(CAST(json_extract(token_breakdown,'$.assistant') AS INTEGER)) AS assistant,
+          SUM(CAST(json_extract(token_breakdown,'$.reasoning') AS INTEGER)) AS reasoning,
+          SUM(CAST(json_extract(token_breakdown,'$.reply') AS INTEGER)) AS reply
+        FROM request_logs
+        WHERE started_at >= ? AND token_breakdown IS NOT NULL
+          AND json_valid(token_breakdown) AND json_type(token_breakdown) = 'object'`,
+      )
+      .get(startTs);
+    const breakdownRow = parseRow(breakdownRowSchema, rawBreakdownRow);
+    const breakdown: RouterUsageBreakdown = {
+      system: finiteNumber(breakdownRow?.system) ?? 0,
+      tools: finiteNumber(breakdownRow?.tools) ?? 0,
+      user: finiteNumber(breakdownRow?.user) ?? 0,
+      toolResults: finiteNumber(breakdownRow?.toolResults) ?? 0,
+      assistant: finiteNumber(breakdownRow?.assistant) ?? 0,
+      reasoning: finiteNumber(breakdownRow?.reasoning) ?? 0,
+      reply: finiteNumber(breakdownRow?.reply) ?? 0,
+    };
+
     return {
       range,
       totals,
@@ -973,6 +1190,9 @@ export class RouterRepository {
         .map(([key, value]) => ({ key, ...value }))
         .sort((a, b) => b.totalTokens - a.totalTokens),
       series,
+      breakdown: breakdown.system + breakdown.tools + breakdown.user + breakdown.toolResults + breakdown.assistant + breakdown.reasoning + breakdown.reply > 0
+        ? breakdown
+        : null,
     };
   }
 
@@ -1017,17 +1237,20 @@ export class RouterRepository {
     start.setHours(0, 0, 0, 0);
     start.setDate(start.getDate() - (span - 1));
     const startKey = localDayKey(start.getTime());
-    const rows = this.db
-      .prepare(`
-        SELECT date, SUM(request_count) AS request_count, SUM(total_tokens) AS total_tokens
-        FROM usage_daily WHERE date >= ? GROUP BY date
-      `)
-      .all(startKey) as unknown as Array<{ date: string; request_count: number; total_tokens: number }>;
+    const rows = parseRows(
+      activityRowSchema,
+      this.db
+        .prepare(`
+          SELECT date, SUM(request_count) AS request_count, SUM(total_tokens) AS total_tokens
+          FROM usage_daily WHERE date >= ? GROUP BY date
+        `)
+        .all(startKey),
+    );
     const buckets = new Map<string, { requestCount: number; totalTokens: number }>();
     for (const row of rows) {
       buckets.set(row.date, {
-        requestCount: Number(row.request_count) || 0,
-        totalTokens: Number(row.total_tokens) || 0,
+        requestCount: row.request_count ?? 0,
+        totalTokens: row.total_tokens ?? 0,
       });
     }
     const result: RouterActivityDay[] = [];
@@ -1048,19 +1271,22 @@ export class RouterRepository {
     start.setHours(0, 0, 0, 0);
     start.setDate(start.getDate() - (span - 1));
     const cutoff = localDayKey(start.getTime());
-    const rows = this.db
-      .prepare(`
-        SELECT COALESCE(NULLIF(client, ''), 'unknown') AS client_key, provider_name, count(*) AS request_count
-        FROM request_logs WHERE log_date >= ?
-        GROUP BY 1, 2
-        ORDER BY request_count DESC, 1, 2
-      `)
-      .all(cutoff) as unknown as Array<{ client_key: string; provider_name: string; request_count: number }>;
+    const rows = parseRows(
+      flowRowSchema,
+      this.db
+        .prepare(`
+          SELECT COALESCE(NULLIF(client, ''), 'unknown') AS client_key, provider_name, count(*) AS request_count
+          FROM request_logs WHERE log_date >= ?
+          GROUP BY 1, 2
+          ORDER BY request_count DESC, 1, 2
+        `)
+        .all(cutoff),
+    );
     return rows
       .map((row) => ({
-        client: String(row.client_key),
-        providerName: String(row.provider_name),
-        requestCount: Number(row.request_count) || 0,
+        client: row.client_key,
+        providerName: row.provider_name,
+        requestCount: row.request_count,
       }))
       .filter((row) => row.requestCount > 0);
   }
@@ -1071,47 +1297,37 @@ export class RouterRepository {
     error: string | null;
     queriedAt: number;
   }): void {
+    let snapshot: string | null = null;
+    if (input.snapshot !== null) {
+      const parsed = routerQuotaSnapshotSchema.safeParse(input.snapshot);
+      if (!parsed.success) throw new Error('Invalid router quota snapshot.');
+      snapshot = JSON.stringify(parsed.data);
+    }
     this.db
       .prepare(`
         INSERT INTO quota_snapshots (provider_id, snapshot, error, queried_at) VALUES (?, ?, ?, ?)
         ON CONFLICT(provider_id) DO UPDATE SET snapshot = excluded.snapshot, error = excluded.error, queried_at = excluded.queried_at
       `)
-      .run(input.providerId, input.snapshot ? JSON.stringify(input.snapshot) : null, input.error, input.queriedAt);
+      .run(input.providerId, snapshot, input.error, input.queriedAt);
   }
 
   listQuotaSnapshots(): Array<{ providerId: string; snapshot: RouterQuotaSnapshot | null; error: string | null; queriedAt: number }> {
-    const rows = this.db.prepare('SELECT * FROM quota_snapshots').all() as unknown as Array<{
-      provider_id: string;
-      snapshot: string | null;
-      error: string | null;
-      queried_at: number;
-    }>;
-    return rows.map((row) => {
-      let snapshot: RouterQuotaSnapshot | null = null;
-      if (row.snapshot) {
-        try {
-          snapshot = JSON.parse(row.snapshot) as RouterQuotaSnapshot;
-        } catch {
-          snapshot = null;
-        }
-      }
-      return { providerId: row.provider_id, snapshot, error: row.error, queriedAt: row.queried_at };
-    });
+    const rows = parseRows(quotaSnapshotRowSchema, this.db.prepare('SELECT * FROM quota_snapshots').all());
+    return rows.map((row) => ({
+      providerId: row.provider_id,
+      snapshot: parseQuotaSnapshot(row.snapshot),
+      error: row.error,
+      queriedAt: row.queried_at,
+    }));
   }
 
   getQuotaSnapshot(providerId: string): { snapshot: RouterQuotaSnapshot | null; queriedAt: number } | null {
-    const row = this.db.prepare('SELECT * FROM quota_snapshots WHERE provider_id = ?').get(providerId) as
-      | { snapshot: string | null; queried_at: number }
-      | undefined;
+    const row = parseRow(
+      quotaSnapshotRowSchema,
+      this.db.prepare('SELECT * FROM quota_snapshots WHERE provider_id = ?').get(providerId),
+    );
     if (!row) return null;
-    try {
-      return {
-        snapshot: row.snapshot ? (JSON.parse(row.snapshot) as RouterQuotaSnapshot) : null,
-        queriedAt: row.queried_at,
-      };
-    } catch {
-      return { snapshot: null, queriedAt: row.queried_at };
-    }
+    return { snapshot: parseQuotaSnapshot(row.snapshot), queriedAt: row.queried_at };
   }
 }
 

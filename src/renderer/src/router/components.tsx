@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { formatTokens } from '../format';
 
@@ -59,14 +59,17 @@ export function RouterStat({
   value,
   hint,
   tone,
+  action,
 }: {
   label: string;
   value: string;
   hint?: string;
   tone?: 'good' | 'warn' | 'danger';
+  action?: ReactNode;
 }) {
   return (
     <div className="router-stat">
+      {action ? <div className="router-stat-action">{action}</div> : null}
       <div className={`router-stat-value ${tone ?? ''}`}>{value}</div>
       <div className="router-stat-label">{label}</div>
       {hint ? <div className="router-stat-hint">{hint}</div> : null}
@@ -115,15 +118,27 @@ export function formatRouterTokens(value: number): string {
 }
 
 export function CopyButton({ text, label = '复制' }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
   return (
     <button
       type="button"
       className="router-btn ghost sm"
+      title={label}
       onClick={() => {
-        void navigator.clipboard.writeText(text);
+        void navigator.clipboard
+          .writeText(text)
+          .then(() => setCopied(true))
+          .catch(() => undefined);
       }}
     >
-      {label}
+      {copied ? '已复制' : label}
     </button>
   );
 }

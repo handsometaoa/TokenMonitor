@@ -1,5 +1,6 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { asRecord, errorMessage } from '../../shared/validation';
 import type {
   RouterActivityDay,
   RouterBalanceConfig,
@@ -30,6 +31,8 @@ import { RouterGateway, type RouterFetch } from './gateway';
 import { adapterFor } from './protocol/registry';
 import type { Conversation } from './protocol/types';
 import { ROUTER_QUOTA_STRATEGIES, executeQuotaStrategy, quotaStrategyInfo } from './quota';
+
+type RouterSecretStore = Pick<ProviderSecretStore, 'get' | 'save' | 'clear'>;
 
 function maskKey(secret: string | null): string | null {
   if (!secret) return null;
@@ -91,7 +94,7 @@ export class RouterService extends EventEmitter {
   constructor(
     baseDir: string,
     private readonly logger: Logger,
-    private readonly secrets: ProviderSecretStore,
+    private readonly secrets: RouterSecretStore,
     private readonly fetchImpl: RouterFetch,
     demo: boolean,
   ) {
@@ -192,8 +195,8 @@ export class RouterService extends EventEmitter {
     if (!Number.isInteger(next.port) || next.port < 1024 || next.port > 65_535) {
       throw new Error('端口必须是 1024-65535');
     }
-    if (next.apiKey.length < 12) throw new Error('API Key 至少 12 个字符');
     if (!next.apiKey) next.apiKey = this.generateApiKey();
+    if (next.apiKey.length < 12) throw new Error('API Key 至少 12 个字符');
     this.repo.setServiceConfig(next);
     await this.gateway.start();
     this.emit('changed');
@@ -269,18 +272,15 @@ export class RouterService extends EventEmitter {
         signal: AbortSignal.timeout(20_000),
       });
     } catch (error) {
-      throw new Error(`连接上游失败：${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`连接上游失败：${errorMessage(error)}`);
     }
     if (response.status === 401 || response.status === 403) throw new Error('API Key 无效或已过期');
     if (!response.ok) throw new Error(`模型列表接口 HTTP ${response.status}`);
-    const body = (await response.json()) as unknown;
-    const list = body && typeof body === 'object' && Array.isArray((body as Record<string, unknown>).data)
-      ? ((body as Record<string, unknown>).data as unknown[])
-      : Array.isArray(body)
-        ? body
-        : [];
+    const body: unknown = await response.json();
+    const record = asRecord(body);
+    const list = Array.isArray(record?.data) ? record.data : Array.isArray(body) ? body : [];
     const ids = list
-      .map((item) => (item && typeof item === 'object' ? (item as Record<string, unknown>).id : item))
+      .map((item) => asRecord(item)?.id ?? item)
       .filter((id): id is string => typeof id === 'string' && id.length > 0);
     return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
   }
@@ -335,15 +335,21 @@ export class RouterService extends EventEmitter {
         return { ...base, error: `构造请求失败：${error instanceof Error ? error.message : String(error)}` };
       }
       const url = `${provider.baseUrl.replace(/\/+$/, '')}${adapter.upstreamPath}`;
+      const headers: Record<string, string> = {
+        ...adapter.authHeaders(apiKey),
+        'content-type': 'application/json',
+        accept: 'application/json',
+      };
+      if (provider.kind === 'opencode' || /opencode\.ai/i.test(provider.baseUrl)) {
+        // OpenCode Go rejects probe requests without a session id. Each probe is a
+        // standalone conversation, so give it a unique id rather than reusing a client's.
+        headers['x-opencode-session'] = randomUUID();
+      }
       const startedAt = Date.now();
       try {
         const response = await this.fetchImpl(url, {
           method: 'POST',
-          headers: {
-            ...adapter.authHeaders(apiKey),
-            'content-type': 'application/json',
-            accept: 'application/json',
-          },
+          headers,
           body: JSON.stringify(wire.body),
           signal: AbortSignal.timeout(25_000),
         });

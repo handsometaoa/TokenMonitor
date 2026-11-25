@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-// Usage: node scripts/checksums.mjs [dir]
+// Usage: npx tsx scripts/checksums.ts [dir]
 // Writes <file>.sha256 next to every installer artifact so downloads can be verified:
 //   macOS/Linux:  sha256sum -c <file>.sha256
 //   Windows:      certutil -hashfile <file> SHA256  (compare with the .sha256 content)

@@ -9,6 +9,7 @@ import {
   ScrollText,
   Server,
   Settings2,
+  X,
 } from 'lucide-react';
 import type { AppState } from '../../../shared/types';
 import type {
@@ -18,6 +19,9 @@ import type {
   RouterState,
 } from '../../../shared/routerTypes';
 import { BrandMark } from '../components/Logo';
+import { createTranslator } from '../i18n';
+import { PanelView } from '../views/Panel';
+import { SettingsPage } from '../views/Settings';
 import { RouterBadge } from './components';
 import { Models } from './pages/Models';
 import { Logs } from './pages/Logs';
@@ -50,6 +54,10 @@ export function RouterApp({ state }: { state: AppState }) {
   const [router, setRouter] = useState<RouterState>(state.router);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [appSettingsOpen, setAppSettingsOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(!state.settings.onboardingCompleted);
+  const language = state.settings.language;
+  const t = useMemo(() => createTranslator(language), [language]);
 
   useEffect(() => {
     setRouter(state.router);
@@ -89,6 +97,17 @@ export function RouterApp({ state }: { state: AppState }) {
     return () => clearInterval(timer);
   }, []);
 
+  // Tray / IPC navigation keeps everything in the single main window.
+  useEffect(
+    () =>
+      window.tokenMonitor.onNavigate((target) => {
+        setAppSettingsOpen(target === 'settings');
+        if (target === 'panel') setPanelOpen(true);
+        if (target === 'router') setPanelOpen(false);
+      }),
+    [],
+  );
+
   const active = useMemo(() => NAV.find((item) => item.id === page) ?? NAV[0], [page]);
   const serviceRunning = router.service.state === 'running';
 
@@ -98,6 +117,15 @@ export function RouterApp({ state }: { state: AppState }) {
       .then(() => reload())
       .catch((reason) => setError(reason instanceof Error ? reason.message : '刷新余量失败'));
   };
+
+  const openAppSettings = () => {
+    setPanelOpen(false);
+    setAppSettingsOpen(true);
+  };
+
+  if (appSettingsOpen) {
+    return <SettingsPage state={state} t={t} language={language} onClose={() => setAppSettingsOpen(false)} />;
+  }
 
   return (
     <div className="router-shell">
@@ -126,6 +154,10 @@ export function RouterApp({ state }: { state: AppState }) {
           })}
         </nav>
         <div className="router-sidebar-foot">
+          <button type="button" className="router-sidebar-settings" onClick={openAppSettings}>
+            <Settings2 size={15} />
+            设置
+          </button>
           <div className="router-service-line">
             <span className={`router-dot ${serviceRunning ? 'good' : router.service.state === 'error' ? 'danger' : 'warn'}`} />
             <span>{serviceRunning ? `127.0.0.1:${router.service.port}` : '网关未启动'}</span>
@@ -135,18 +167,21 @@ export function RouterApp({ state }: { state: AppState }) {
       </aside>
 
       <main className="router-main">
-        <header className="router-header">
+        <header className="router-header drag">
           <div>
             <div className="router-header-title">{active.label}</div>
             <div className="router-header-sub">{active.sub}</div>
           </div>
-          <div className="router-header-actions">
+          <div className="router-header-actions no-drag">
             <RouterBadge tone={serviceRunning ? 'good' : router.service.state === 'error' ? 'danger' : 'warn'}>
               {serviceRunning ? '网关运行中' : router.service.state === 'error' ? '网关错误' : '网关已停止'}
             </RouterBadge>
             <button type="button" className="router-btn" onClick={() => void reload()} disabled={loading}>
               <RefreshCw size={14} className={loading ? 'spin' : ''} />
               刷新
+            </button>
+            <button type="button" className="router-icon-btn" title="隐藏到托盘" onClick={() => void window.tokenMonitor.hideWindow()}>
+              <X size={16} />
             </button>
           </div>
         </header>
@@ -183,6 +218,25 @@ export function RouterApp({ state }: { state: AppState }) {
           {page === 'settings' ? <RouterSettings state={router} onChanged={() => void reload()} /> : null}
         </div>
       </main>
+
+      {panelOpen ? (
+        <>
+          <div className="router-float-scrim" onClick={() => setPanelOpen(false)} />
+          <aside className="router-float-panel" role="dialog" aria-label="Token 面板">
+            <PanelView
+              state={state}
+              onOpenSettings={openAppSettings}
+              onOpenRouter={() => setPanelOpen(false)}
+              onClose={() => setPanelOpen(false)}
+            />
+          </aside>
+        </>
+      ) : (
+        <button type="button" className="router-float-toggle no-drag" title="展开 Token 面板" onClick={() => setPanelOpen(true)}>
+          <Gauge size={16} />
+          <span>面板</span>
+        </button>
+      )}
     </div>
   );
 }

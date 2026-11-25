@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { createDefaultSettings } from '../../shared/defaults';
 import type { AppSettings, UpdateSettingsPatch } from '../../shared/types';
+import { asRecord, parseJson } from '../../shared/validation';
 
 const settingsSchema = z.object({
   schemaVersion: z.literal(1),
@@ -65,12 +66,14 @@ export class SettingsStore extends EventEmitter {
     const merged: AppSettings = {
       ...current,
       ...patch,
-      notifications: patch.notifications
+      notifications: asRecord(patch.notifications)
         ? { ...current.notifications, ...patch.notifications }
         : current.notifications,
-      homeCards: patch.homeCards ? { ...current.homeCards, ...patch.homeCards } : current.homeCards,
+      homeCards: asRecord(patch.homeCards)
+        ? { ...current.homeCards, ...patch.homeCards }
+        : current.homeCards,
       homeCardOrder: patch.homeCardOrder ?? current.homeCardOrder,
-      quotaVisibility: patch.quotaVisibility
+      quotaVisibility: asRecord(patch.quotaVisibility)
         ? { ...current.quotaVisibility, ...patch.quotaVisibility }
         : current.quotaVisibility,
       trayShowRouterQuota: patch.trayShowRouterQuota ?? current.trayShowRouterQuota,
@@ -106,20 +109,20 @@ export class SettingsStore extends EventEmitter {
     }
 
     try {
-      const raw = JSON.parse(readFileSync(this.filePath, 'utf8')) as unknown;
-      const migrated =
-        raw && typeof raw === 'object' && !Array.isArray(raw)
-          ? {
-              ...(raw as Record<string, unknown>),
-              homeCards: { ...defaults.homeCards, ...((raw as Record<string, unknown>).homeCards as Record<string, unknown> | undefined) },
-              homeCardOrder: (raw as Record<string, unknown>).homeCardOrder ?? defaults.homeCardOrder,
-              quotaVisibility: {
-                ...defaults.quotaVisibility,
-                ...(((raw as Record<string, unknown>).quotaVisibility as Record<string, boolean> | undefined) ?? {}),
-              },
-              trayShowRouterQuota: (raw as Record<string, unknown>).trayShowRouterQuota ?? defaults.trayShowRouterQuota,
-            }
-          : raw;
+      const raw = parseJson(readFileSync(this.filePath, 'utf8'));
+      const record = asRecord(raw);
+      const migrated = record
+        ? {
+            ...record,
+            homeCards: { ...defaults.homeCards, ...(asRecord(record.homeCards) ?? {}) },
+            homeCardOrder: record.homeCardOrder ?? defaults.homeCardOrder,
+            quotaVisibility: {
+              ...defaults.quotaVisibility,
+              ...(asRecord(record.quotaVisibility) ?? {}),
+            },
+            trayShowRouterQuota: record.trayShowRouterQuota ?? defaults.trayShowRouterQuota,
+          }
+        : raw;
       const parsed = settingsSchema.safeParse(migrated);
       if (!parsed.success) throw new Error('schema mismatch');
       return {

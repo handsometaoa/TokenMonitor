@@ -138,7 +138,7 @@ export class TrayManager {
     items.push({ type: 'separator' });
     items.push({
       label: zh ? '打开面板' : 'Open dashboard',
-      click: () => this.windows.showMain(),
+      click: () => this.windows.showPanel(),
     });
     items.push({
       label: `AI Router · ${
@@ -210,7 +210,9 @@ export class TrayManager {
       (item) => item.configured && item.snapshot && tooltipVisibility[agentQuotaKey(item.providerId)] !== false,
     )) {
       if (parts.length >= 4) break;
-      const remaining = Math.min(...provider.snapshot!.windows.map((window) => window.remainingPercent));
+      const snapshot = provider.snapshot;
+      if (!snapshot) continue;
+      const remaining = Math.min(...snapshot.windows.map((window) => window.remainingPercent));
       parts.push(`${provider.providerName} ${Math.round(remaining)}%`);
     }
 

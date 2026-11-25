@@ -3,11 +3,13 @@ import { RefreshCw } from 'lucide-react';
 import type {
   RouterActivityDay,
   RouterClientProviderFlow,
+  RouterUsageBreakdown,
   RouterUsageGroup,
   RouterUsageOverview,
   RouterUsageRange,
 } from '../../../../shared/routerTypes';
-import { RouterStat, formatRouterDuration, formatRouterTokens } from '../components';
+import { RouterBadge, RouterStat, formatRouterDuration, formatRouterTokens } from '../components';
+import { isRouterUsageRange } from '../../../../shared/routerSchemas';
 
 const RANGES: Array<{ value: RouterUsageRange; label: string }> = [
   { value: 'today', label: '今天' },
@@ -21,15 +23,135 @@ const FLOW_DAYS = 7;
 const FLOW_OTHER = '\u0000other';
 const FLOW_COLORS = ['var(--accent)', 'var(--accent-2)', '#14b8a6', '#d97706', '#ec4899', '#0891b2', '#16a34a', '#f472b6'];
 
+const BREAKDOWN_META: Array<{ key: keyof RouterUsageBreakdown; label: string; color: string }> = [
+  { key: 'system', label: '系统提示词', color: '#5b8def' },
+  { key: 'tools', label: '工具定义', color: '#f59e0b' },
+  { key: 'user', label: '用户消息', color: '#22c55e' },
+  { key: 'toolResults', label: '工具调用结果', color: '#14b8a6' },
+  { key: 'assistant', label: '注入历史', color: '#8b5cf6' },
+  { key: 'reasoning', label: '模型思考', color: '#c084fc' },
+  { key: 'reply', label: '模型回复', color: '#ec4899' },
+];
+
+function breakdownTotal(breakdown: RouterUsageBreakdown): number {
+  return BREAKDOWN_META.reduce((sum, meta) => sum + (breakdown[meta.key] || 0), 0);
+}
+
+function TokenBreakdownCard({
+  breakdown,
+  cacheHit,
+}: {
+  breakdown: RouterUsageBreakdown;
+  cacheHit: number | null;
+}) {
+  const total = breakdownTotal(breakdown);
+  const segments = BREAKDOWN_META.map((meta) => ({ ...meta, value: breakdown[meta.key] || 0 })).filter(
+    (segment) => segment.value > 0,
+  );
+  const radius = 62;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+
+  return (
+    <div className="router-card">
+      <div className="router-card-head compact">
+        <div>
+          <div className="router-card-title">Token 统计</div>
+          <div className="router-card-sub">按请求体结构估算分类 · 输出侧为精确值</div>
+        </div>
+        {cacheHit !== null ? <RouterBadge tone={cacheHit >= 70 ? 'good' : 'warn'}>缓存命中 {cacheHit.toFixed(2)}%</RouterBadge> : null}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap' }}>
+        <svg width={160} height={160} viewBox="0 0 160 160" role="img" aria-label="Token 分类占比" style={{ flex: '0 0 auto' }}>
+          <circle cx={80} cy={80} r={radius} fill="none" stroke="var(--track)" strokeWidth={20} />
+          {segments.map((segment) => {
+            const fraction = segment.value / total;
+            const dash = fraction * circumference;
+            const element = (
+              <circle
+                key={segment.key}
+                cx={80}
+                cy={80}
+                r={radius}
+                fill="none"
+                stroke={segment.color}
+                strokeWidth={20}
+                strokeDasharray={`${Math.max(0, dash - 1.5)} ${circumference - Math.max(0, dash - 1.5)}`}
+                strokeDashoffset={-offset}
+                transform="rotate(-90 80 80)"
+              />
+            );
+            offset += dash;
+            return element;
+          })}
+          <text x={80} y={76} textAnchor="middle" fontSize={17} fontWeight={700} fill="var(--text)" className="mono">
+            {formatRouterTokens(total)}
+          </text>
+          <text x={80} y={95} textAnchor="middle" fontSize={9.5} fill="var(--muted)">
+            总用量
+          </text>
+        </svg>
+        <div style={{ flex: 1, minWidth: 260, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '7px 18px' }}>
+          {segments.map((segment) => (
+            <div key={segment.key} style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <span style={{ width: 9, height: 9, borderRadius: 3, background: segment.color, flex: '0 0 auto' }} />
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11.5 }}>
+                {segment.label}
+              </span>
+              <span className="mono" style={{ fontWeight: 650, fontSize: 11.5 }}>
+                {((segment.value / total) * 100).toFixed(1)}%
+              </span>
+              <span className="mono" style={{ color: 'var(--muted)', fontSize: 10.5, width: 64, textAlign: 'right' }}>
+                ≈{formatRouterTokens(segment.value)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UsageBars({ usage }: { usage: RouterUsageOverview }) {
   const max = useMemo(() => Math.max(1, ...usage.series.totalTokens), [usage]);
+  const [hover, setHover] = useState<number | null>(null);
+  const hovered =
+    hover === null
+      ? null
+      : {
+          label: usage.series.labels[hover] ?? '',
+          tokens: usage.series.totalTokens[hover] ?? 0,
+          requests: usage.series.requestCount[hover] ?? 0,
+          cache: usage.series.cacheTokens[hover] ?? 0,
+        };
   return (
-    <div className="router-bars" role="img" aria-label="tokens 趋势">
+    <div className="router-bars" role="img" aria-label="tokens 趋势" onMouseLeave={() => setHover(null)}>
       {usage.series.totalTokens.map((value, index) => (
-        <div className="router-bar-slot" key={usage.series.buckets[index]} title={`${usage.series.labels[index]} · ${formatRouterTokens(value)} tokens`}>
+        <div
+          className="router-bar-slot"
+          key={usage.series.buckets[index]}
+          onMouseEnter={() => setHover(index)}
+        >
           <div className="router-bar" style={{ height: `${Math.max(2, (value / max) * 100)}%` }} />
         </div>
       ))}
+      {hovered ? (
+        <div className="router-bar-tip">
+          <div className="router-bar-tip-date">{hovered.label}</div>
+          <div className="router-bar-tip-row">
+            <span>Tokens</span>
+            <strong>{formatRouterTokens(hovered.tokens)}</strong>
+          </div>
+          <div className="router-bar-tip-row">
+            <span>请求</span>
+            <strong>{hovered.requests}</strong>
+          </div>
+          <div className="router-bar-tip-row">
+            <span>缓存</span>
+            <strong>{formatRouterTokens(hovered.cache)}</strong>
+          </div>
+        </div>
+      ) : null}
       <div className="router-bars-labels">
         {usage.series.labels.map((label, index) =>
           index % Math.max(1, Math.ceil(usage.series.labels.length / 7)) === 0 || index === usage.series.labels.length - 1 ? (
@@ -460,7 +582,14 @@ export function Usage({ onError }: { onError: (message: string) => void }) {
     <div className="router-page">
       <div className="router-toolbar">
         <div className="router-toolbar-actions">
-          <select className="router-select" value={range} onChange={(event) => setRange(event.target.value as RouterUsageRange)}>
+          <select
+            className="router-select"
+            value={range}
+            onChange={(event) => {
+              const next = event.target.value;
+              if (isRouterUsageRange(next)) setRange(next);
+            }}
+          >
             {RANGES.map((item) => (
               <option key={item.value} value={item.value}>{item.label}</option>
             ))}
@@ -505,6 +634,17 @@ export function Usage({ onError }: { onError: (message: string) => void }) {
           hint={`缓存读 ${formatRouterTokens(totals?.cacheReadTokens ?? 0)}`}
         />
       </div>
+
+      {usage?.breakdown ? (
+        <TokenBreakdownCard
+          breakdown={usage.breakdown}
+          cacheHit={
+            totals && totals.promptTokens + totals.cacheReadTokens + totals.cacheWriteTokens > 0
+              ? (totals.cacheReadTokens / (totals.promptTokens + totals.cacheReadTokens + totals.cacheWriteTokens)) * 100
+              : null
+          }
+        />
+      ) : null}
 
       <div className="router-card">
         <div className="router-card-head compact">

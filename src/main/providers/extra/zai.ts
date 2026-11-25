@@ -1,9 +1,6 @@
+import { asRecord, errorMessage, stringValue } from '../../../shared/validation';
 import type { ExtraProviderCredential, ExtraFetch, RawExtraSnapshot, RawExtraWindow } from './types';
 import { ExtraProviderError, clampPercent, errorForStatus, isoReset, labelForMinutes } from './types';
-
-function record(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
 
 function integer(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) ? value : null;
@@ -20,9 +17,9 @@ function mapLimit(
   rawValue: unknown,
   providerId: 'zai' | 'zcode',
 ): RawExtraWindow | null {
-  const raw = record(rawValue);
+  const raw = asRecord(rawValue);
   if (!raw) return null;
-  const type = typeof raw.type === 'string' ? raw.type : '';
+  const type = stringValue(raw.type) ?? '';
   if (!['TOKENS_LIMIT', 'CREDIT_LIMIT', 'TIME_LIMIT'].includes(type)) return null;
 
   const percentage = integer(raw.percentage);
@@ -68,12 +65,10 @@ export async function fetchZaiSnapshot(
     Accept: 'application/json',
     'User-Agent': 'TokenMonitor/0.4.6',
   };
-  if (team) {
-    headers['Bigmodel-Organization'] = credential.organizationId!;
-    headers['Bigmodel-Project'] = credential.projectId!;
-  }
+  if (credential.organizationId) headers['Bigmodel-Organization'] = credential.organizationId;
+  if (credential.projectId) headers['Bigmodel-Project'] = credential.projectId;
 
-  let response: Response;
+  let response: Awaited<ReturnType<ExtraFetch>>;
   try {
     response = await fetchImpl(url, {
       method: 'GET',
@@ -82,19 +77,21 @@ export async function fetchZaiSnapshot(
       cache: 'no-store',
     });
   } catch (error) {
-    throw new ExtraProviderError('network', error instanceof Error ? error.message : `${providerName} 网络请求失败。`);
+    throw new ExtraProviderError('network', errorMessage(error) || `${providerName} 网络请求失败。`);
   }
   if (!response.ok) throw errorForStatus(response.status, providerName);
 
-  let json: Record<string, unknown>;
+  let json: unknown;
   try {
-    json = (await response.json()) as Record<string, unknown>;
+    json = await response.json();
   } catch {
     throw new ExtraProviderError('malformed', `${providerName} 用量响应无法解析。`);
   }
+  const payload = asRecord(json);
+  if (!payload) throw new ExtraProviderError('malformed', `${providerName} 用量响应格式无效。`);
 
-  if (json.success !== true || json.code !== 200) {
-    const message = typeof json.msg === 'string' ? json.msg : '无法读取 Coding Plan 用量。';
+  if (payload.success !== true || payload.code !== 200) {
+    const message = stringValue(payload.msg) ?? '无法读取 Coding Plan 用量。';
     const noPlan = /coding plan|不存在/i.test(message);
     const hint =
       providerId === 'zcode' && noPlan
@@ -106,7 +103,7 @@ export async function fetchZaiSnapshot(
     );
   }
 
-  const data = record(json.data);
+  const data = asRecord(payload.data);
   const rawLimits = Array.isArray(data?.limits) ? data?.limits : [];
   const windows = rawLimits
     .map((limit) => mapLimit(limit, providerId))
@@ -122,9 +119,9 @@ export async function fetchZaiSnapshot(
   }
 
   const planCandidate = [data?.planName, data?.plan, data?.plan_type, data?.packageName, data?.level].find(
-    (value) => typeof value === 'string' && value.trim(),
+    (value) => stringValue(value)?.trim(),
   );
-  const planLabel = credential.planLabel || (typeof planCandidate === 'string' ? planCandidate : providerName);
+  const planLabel = credential.planLabel || stringValue(planCandidate) || providerName;
   return {
     providerId,
     providerName,
