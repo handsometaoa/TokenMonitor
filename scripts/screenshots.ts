@@ -254,11 +254,12 @@ async function pushTraffic(port: number, apiKey: string): Promise<void> {
 
     // Enable the local gateway on a free port so this never fights a locally
     // running instance; the key is generated here and reused in phase 2.
-    const config = await page.evaluate(
+    await page.evaluate(
       (port) => window.tokenMonitor.saveRouterServiceConfig({ enabled: true, port }),
       gatewayPort,
     );
     await page.waitForTimeout(900);
+    const config = await page.evaluate(() => window.tokenMonitor.getRouterServiceConfig());
     const state = await page.evaluate(() => window.tokenMonitor.getRouterState());
     console.log('gateway enabled, port', config.port, 'state', state.service.state);
 
@@ -276,8 +277,9 @@ try {
   const page = await openRouter(app);
 
   // Demo skips gateway autostart; toggling the persisted config starts it.
-  const config = await page.evaluate(() => window.tokenMonitor.saveRouterServiceConfig({ enabled: true }));
+  await page.evaluate(() => window.tokenMonitor.saveRouterServiceConfig({ enabled: true }));
   await page.waitForTimeout(900);
+  const config = await page.evaluate(() => window.tokenMonitor.getRouterServiceConfig());
   await pushTraffic(config.port, config.apiKey);
   await page.waitForTimeout(1800);
 
