@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
   ArrowLeft,
   Bell,
-  Copy,
-  Database,
   ExternalLink,
   FolderOpen,
   GripVertical,
@@ -18,14 +16,13 @@ import {
 import type {
   AppInfo,
   AppState,
-  ExtraProviderId,
   HomeCardId,
   UpdateSettingsPatch,
 } from '../../../shared/types';
 import type { Translator } from '../i18n';
 import { formatRelative } from '../format';
 import { useNow } from '../hooks';
-import { Banner, SectionCard, Segmented, Spinner, Toggle } from '../components/ui';
+import { Banner, SectionCard, Segmented, Toggle } from '../components/ui';
 import { BrandMark } from '../components/Logo';
 import { orbTargets } from '../orbTargets';
 import { SubscriptionCredentials } from './SubscriptionCredentials';
@@ -91,51 +88,6 @@ export function SettingsPage({
     void update({ homeCardOrder: next });
   };
 
-  const providerHint = (providerId: ExtraProviderId): string => {
-    const zh = language === 'zh-CN';
-    switch (providerId) {
-      case 'codex':
-        return zh
-          ? '自动读取 ~/.codex/auth.json 的 OAuth 登录；失效后可粘贴 access token。'
-          : 'Reads the OAuth login from ~/.codex/auth.json; paste an access token to override.';
-      case 'claude':
-        return zh
-          ? '自动读取 ~/.claude/.credentials.json；也可粘贴 Claude Code OAuth Token。'
-          : 'Reads ~/.claude/.credentials.json; paste a Claude Code OAuth token to override.';
-      case 'cursor':
-        return zh
-          ? '粘贴 cursor.com 的 Cookie header（含 WorkosCursorSessionToken），或 Cursor session token。'
-          : 'Paste the cursor.com Cookie header (including WorkosCursorSessionToken), or a Cursor session token.';
-      case 'zai':
-        return zh
-          ? 'API Key 默认使用 api.z.ai（Global）。团队 BigModel 版可粘贴 JSON：{"apiKey","organizationId","projectId","region":"bigmodel-cn"}。'
-          : 'API key defaults to api.z.ai (Global). For team BigModel, paste JSON: {"apiKey","organizationId","projectId","region":"bigmodel-cn"}.';
-      case 'zcode':
-        return zh
-          ? '自动读取 ~/.zcode/v2/config.json 的 Coding Plan 凭证；团队版可粘贴含 organizationId/projectId 的 JSON 覆盖。'
-          : 'Reads Coding Plan credentials from ~/.zcode/v2/config.json; override team plans with JSON containing organizationId/projectId.';
-      default:
-        return '';
-    }
-  };
-
-  const sourceLabel = (source: string): string => {
-    const zh = language === 'zh-CN';
-    switch (source) {
-      case 'manual':
-        return zh ? '手动凭证' : 'Manual';
-      case 'env':
-        return zh ? '环境变量' : 'Environment';
-      case 'auth-file':
-        return zh ? '本机登录态' : 'Local sign-in';
-      case 'zcode':
-        return zh ? 'ZCode 本机配置' : 'ZCode config';
-      case 'auto':
-        return zh ? '自动检测' : 'Auto';
-      default:
-        return zh ? '未连接' : 'Not connected';
-    }
-  };
 
   const sectionLabel = t(NAV.find((item) => item.id === section)?.labelKey ?? 'settings.general');
 

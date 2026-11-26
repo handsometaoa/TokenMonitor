@@ -117,23 +117,6 @@ export function SubscriptionCredentials({
     }
   };
 
-  const sourceLabel = (source: string): string => {
-    switch (source) {
-      case 'manual':
-        return zh ? '手动凭证' : 'Manual';
-      case 'env':
-        return zh ? '环境变量' : 'Environment';
-      case 'auth-file':
-        return zh ? '本机登录态' : 'Local sign-in';
-      case 'zcode':
-        return zh ? 'ZCode 本机配置' : 'ZCode config';
-      case 'auto':
-        return zh ? '自动检测' : 'Auto';
-      default:
-        return zh ? '未连接' : 'Not connected';
-    }
-  };
-
   const toggleFor = (providerId: string, label: string) => (
     <Toggle
       checked={isEnabled(providerId)}

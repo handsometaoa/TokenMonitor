@@ -1549,12 +1549,6 @@ html[data-platform='darwin'] .router-header {
   color: var(--faint);
 }
 
-.router-settings-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .router-heat-layout {
   display: flex;
   align-items: flex-start;

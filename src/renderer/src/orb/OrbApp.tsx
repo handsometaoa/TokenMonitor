@@ -18,7 +18,7 @@ function statusOf(target: OrbTarget | null): TargetStatus {
 const RING_RADIUS = 24;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
-function ringColor(remaining: number | null, status: TargetStatus): string {
+function ringColor(remaining: number | null): string {
   if (remaining === null) return 'rgba(139, 148, 170, 0.45)';
   if (remaining <= 5) return '#f87171';
   if (remaining <= 20) return '#fbbf24';
@@ -53,7 +53,7 @@ export function OrbApp() {
   const resolved = useMemo(() => resolveOrbView(target, view), [target, view]);
 
   const remaining = resolved.percent;
-  const progressColor = ringColor(remaining, status);
+  const progressColor = ringColor(remaining);
   const dashOffset = remaining === null ? RING_CIRCUMFERENCE : RING_CIRCUMFERENCE * (1 - Math.min(100, Math.max(0, remaining)) / 100);
   const value = remaining !== null ? `${Math.round(remaining)}%` : (resolved.balanceText ?? '—');
 

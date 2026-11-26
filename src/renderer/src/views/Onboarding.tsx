@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
-import type { AppState, ExtraProviderId } from '../../../shared/types';
+import type { AppState } from '../../../shared/types';
 import { agentQuotaKey } from '../../../shared/types';
-import { EXTRA_PROVIDER_NAMES } from '../../../shared/providers';
 import type { Translator } from '../i18n';
 import { Toggle } from '../components/ui';
 

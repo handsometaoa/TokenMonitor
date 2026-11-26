@@ -1176,19 +1176,6 @@ html[data-platform='darwin'] .titlebar {
   margin: 0 auto;
 }
 
-.settings-page-title {
-  font-size: 22px;
-  font-weight: 720;
-  letter-spacing: -0.035em;
-  margin: 0;
-}
-
-.settings-page-sub {
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
 .settings-section {
   margin-top: 22px;
   background: var(--surface);
