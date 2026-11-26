@@ -1,7 +1,7 @@
 import { app, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import { IPC } from '../shared/api';
-import { routerProtocolSchema, routerProviderKindSchema } from '../shared/routerSchemas';
+import { routerProtocolSchema, routerProviderKindSchema, routerUsageRangeSchema } from '../shared/routerSchemas';
 import type { AppController } from './appController';
 import type { WindowManager } from './windowManager';
 
@@ -296,7 +296,7 @@ export function registerIpc(
 
   ipcMain.handle(IPC.getRouterUsage, (event, range: unknown) => {
     assertTrusted(event, windows);
-    const parsed = z.enum(['today', '24h', '7d', '30d']).safeParse(range);
+    const parsed = routerUsageRangeSchema.safeParse(range);
     if (!parsed.success) throw new Error('Invalid router usage range');
     return controller.getRouterUsage(parsed.data);
   });

@@ -79,19 +79,6 @@ export function SettingsPage({
     }
   };
 
-  const credentialSourceLabel = useMemo(() => {
-    switch (state.credentials.kind) {
-      case 'manual':
-        return t('settings.sourceManual');
-      case 'env':
-        return t('settings.sourceEnv');
-      case 'auth-file':
-        return t('settings.sourceAuth');
-      default:
-        return t('settings.sourceNone');
-    }
-  }, [state.credentials.kind, t]);
-
   const moveHomeCard = (from: number, to: number) => {
     const current = state.settings.homeCardOrder;
     if (from === to || from < 0 || to < 0 || from >= current.length || to >= current.length) return;
@@ -203,18 +190,7 @@ export function SettingsPage({
             <>
               <h1 className="settings-page-title">{t('settings.general')}</h1>
               <p className="settings-page-sub">{t('app.subtitle')}</p>
-              <SectionCard title={t('provider.openCodeGo')} subtitle={t('settings.connectionSub')}>
-                <div className="settings-row">
-                  <div className="settings-row-copy">
-                    <strong>{t('settings.credential')}</strong>
-                    <span>{credentialSourceLabel}{state.credentials.masked ? ` · ${state.credentials.masked}` : ''}</span>
-                  </div>
-                  <div className="settings-control">
-                    <span className={`chip ${state.credentials.configured ? 'good' : 'warn'}`}>
-                      {state.credentials.configured ? t('status.normal') : t('status.off')}
-                    </span>
-                  </div>
-                </div>
+              <SectionCard title={t('settings.runtimeTitle')} subtitle={t('settings.runtimeSub')}>
                 <div className="settings-row">
                   <div className="settings-row-copy">
                     <strong>{t('common.refresh')}</strong>

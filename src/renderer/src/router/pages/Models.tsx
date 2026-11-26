@@ -49,6 +49,8 @@ export function Models({
   const [bulkTesting, setBulkTesting] = useState(false);
   const [formModels, setFormModels] = useState<string[]>([]);
   const [formModelsBusy, setFormModelsBusy] = useState(false);
+  const [formModelsError, setFormModelsError] = useState<string | null>(null);
+  const [copiedFormModel, setCopiedFormModel] = useState<string | null>(null);
 
   // The parent only loads active models. While "show archived" is on, keep the
   // locally fetched full list instead of letting the parent refresh wipe archived rows.
@@ -136,6 +138,15 @@ export function Models({
     });
   };
 
+  const mergeTestResults = (results: RouterModelTestResult[]) => {
+    if (results.length === 0) return;
+    setTestResults((current) => {
+      const next = new Map(current);
+      for (const result of results) next.set(testKey(result.publicModel, result.providerName), result);
+      return next;
+    });
+  };
+
   const runTest = async (publicName: string | null) => {
     setError(null);
     // One-click testing targets every group with a routed channel; single-model
@@ -148,31 +159,56 @@ export function Models({
     if (names.length === 0) return;
     if (!publicName) setBulkTesting(true);
     markGroupsRunning(names, 1);
+
+    // Probe each model group independently so results land as soon as that group
+    // finishes instead of waiting for the whole batch. Concurrency stays at 2 to
+    // keep upstream load close to the previous behaviour.
+    const queue = [...names];
+    const errors: string[] = [];
+    const worker = async () => {
+      for (;;) {
+        const name = queue.shift();
+        if (!name) return;
+        try {
+          mergeTestResults(await window.tokenMonitor.testRouterModels(name));
+        } catch (reason) {
+          errors.push(reason instanceof Error ? reason.message : '模型检测失败');
+        } finally {
+          markGroupsRunning([name], -1);
+        }
+      }
+    };
+
     try {
-      const results = await window.tokenMonitor.testRouterModels(publicName);
-      setTestResults((current) => {
-        const next = new Map(current);
-        for (const result of results) next.set(testKey(result.publicModel, result.providerName), result);
-        return next;
-      });
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '模型检测失败');
+      await Promise.all(Array.from({ length: Math.min(2, names.length) }, () => worker()));
+      if (errors.length > 0) setError(errors[0] ?? '模型检测失败');
     } finally {
-      markGroupsRunning(names, -1);
       if (!publicName) setBulkTesting(false);
     }
   };
 
   const pullFormModels = async () => {
     if (!editing?.providerId) return;
-    setError(null);
+    setFormModelsError(null);
     setFormModelsBusy(true);
     try {
-      setFormModels(await window.tokenMonitor.listRouterProviderModels(editing.providerId));
+      const models = await window.tokenMonitor.listRouterProviderModels(editing.providerId);
+      setFormModels(models);
+      if (models.length === 0) setFormModelsError('上游返回了空模型列表。');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '拉取模型失败');
+      setFormModelsError(reason instanceof Error ? reason.message : '拉取模型失败');
     } finally {
       setFormModelsBusy(false);
+    }
+  };
+
+  const copyFormModel = async (model: string) => {
+    try {
+      await navigator.clipboard.writeText(model);
+      setCopiedFormModel(model);
+      window.setTimeout(() => setCopiedFormModel((current) => (current === model ? null : current)), 1600);
+    } catch {
+      // Clipboard unavailable; ignore.
     }
   };
 
@@ -426,7 +462,15 @@ export function Models({
           <div className="router-form-section">
             <div className="router-form-section-title">渠道映射</div>
             <Field label="提供商" hint="只有未归档的提供商可创建渠道">
-              <select className="router-select" value={editing.providerId} onChange={(event) => setEditing({ ...editing, providerId: event.target.value })}>
+              <select
+                className="router-select"
+                value={editing.providerId}
+                onChange={(event) => {
+                  setFormModels([]);
+                  setFormModelsError(null);
+                  setEditing({ ...editing, providerId: event.target.value });
+                }}
+              >
                 {providers.filter((provider) => !provider.archivedAt).map((provider) => (
                   <option key={provider.id} value={provider.id}>
                     {provider.name} · {provider.protocol}
@@ -444,25 +488,41 @@ export function Models({
                   value={editing.upstreamName}
                   onChange={(event) => setEditing({ ...editing, upstreamName: event.target.value })}
                   placeholder="gpt-4o-mini"
-                  list="upstream-model-options"
                 />
               </Field>
             </div>
-            <datalist id="upstream-model-options">
-              {formModels.map((model) => (
-                <option key={model} value={model} />
-              ))}
-            </datalist>
             <button
               type="button"
               className="router-btn"
               onClick={() => void pullFormModels()}
               disabled={formModelsBusy || !editing.providerId}
-              title="从提供商 /models 接口拉取可用模型，填充到上方输入的自动补全"
+              title="从提供商 /models 接口拉取可用模型"
             >
               <ListTree size={13} />
-              {formModelsBusy ? '拉取中…' : '拉取模型列表'}
+              {formModelsBusy ? '拉取中…' : formModels.length > 0 ? `重新拉取（${formModels.length}）` : '拉取模型列表'}
             </button>
+            {formModelsError ? <div className="router-banner danger">{formModelsError}</div> : null}
+            {formModels.length > 0 ? (
+              <div className="router-model-picker">
+                <div className="router-model-picker-hint">
+                  单击填入上游模型名，双击复制模型名
+                </div>
+                <div className="router-model-picker-list">
+                  {formModels.map((model) => (
+                    <button
+                      type="button"
+                      key={model}
+                      className={`router-model-chip ${editing.upstreamName === model ? 'active' : ''} ${copiedFormModel === model ? 'copied' : ''}`}
+                      title={copiedFormModel === model ? '已复制' : '单击填入，双击复制'}
+                      onClick={() => setEditing({ ...editing, upstreamName: model })}
+                      onDoubleClick={() => void copyFormModel(model)}
+                    >
+                      {copiedFormModel === model ? `✓ ${model}` : model}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
           <div className="router-form-section">
             <div className="router-form-section-title">状态</div>

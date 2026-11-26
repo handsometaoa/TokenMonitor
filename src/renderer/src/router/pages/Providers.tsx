@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Archive, ListTree, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { Archive, ListTree, Pencil, Plus, Power, RotateCcw, Trash2 } from 'lucide-react';
 import type {
   RouterProvider,
   RouterProviderInput,
@@ -89,7 +89,18 @@ export function Providers({
   const [busy, setBusy] = useState(false);
   const [fetchingModelProvider, setFetchingModelProvider] = useState<string | null>(null);
   const [fetchedModels, setFetchedModels] = useState<{ providerName: string; models: string[] } | null>(null);
+  const [copiedModel, setCopiedModel] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
+
+  const copyModel = async (model: string) => {
+    try {
+      await navigator.clipboard.writeText(model);
+      setCopiedModel(model);
+      window.setTimeout(() => setCopiedModel((current) => (current === model ? null : current)), 1600);
+    } catch {
+      // Clipboard unavailable; keep the list usable.
+    }
+  };
 
   // The parent only loads active providers. While "show archived" is on, keep the
   // locally fetched full list instead of letting the parent refresh wipe archived rows.
@@ -145,6 +156,27 @@ export function Providers({
   const archive = async (provider: RouterProvider, archived: boolean) => {
     await window.tokenMonitor.archiveRouterProvider(provider.id, archived);
     await reload();
+  };
+
+  // Quick enable/disable straight from the table; apiKey is omitted so the
+  // stored credential is untouched.
+  const toggleProvider = async (provider: RouterProvider) => {
+    setError(null);
+    try {
+      await window.tokenMonitor.saveRouterProvider({
+        id: provider.id,
+        name: provider.name,
+        protocol: provider.protocol,
+        kind: provider.kind,
+        baseUrl: provider.baseUrl,
+        enabled: !provider.enabled,
+        quotaStrategyId: provider.quotaStrategyId,
+        strategyConfig: provider.strategyConfig,
+      });
+      await reload();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '更新提供商状态失败');
+    }
   };
 
   const remove = async (provider: RouterProvider) => {
@@ -224,13 +256,25 @@ export function Providers({
                 <td>{provider.hasKey ? <span className="mono">{provider.keyMasked}</span> : <RouterBadge tone="warn">未配置</RouterBadge>}</td>
                 <td>{provider.quotaStrategyId ?? '—'}</td>
                 <td>
-                  {provider.archivedAt ? (
-                    <RouterBadge>已归档</RouterBadge>
-                  ) : provider.enabled ? (
-                    <RouterBadge tone="good">启用</RouterBadge>
-                  ) : (
-                    <RouterBadge tone="warn">停用</RouterBadge>
-                  )}
+                  <div className="router-status-cell">
+                    {provider.archivedAt ? (
+                      <RouterBadge>已归档</RouterBadge>
+                    ) : provider.enabled ? (
+                      <RouterBadge tone="good">启用</RouterBadge>
+                    ) : (
+                      <RouterBadge tone="warn">停用</RouterBadge>
+                    )}
+                    {!provider.archivedAt ? (
+                      <button
+                        type="button"
+                        className="router-icon-btn"
+                        title={provider.enabled ? '停用该提供商' : '启用该提供商'}
+                        onClick={() => void toggleProvider(provider)}
+                      >
+                        <Power size={13} />
+                      </button>
+                    ) : null}
+                  </div>
                 </td>
                 <td>
                   <div className="router-row-actions">
@@ -429,7 +473,7 @@ export function Providers({
       {fetchedModels ? (
         <RouterModal
           title={`可用模型 · ${fetchedModels.providerName}`}
-          subtitle={`共 ${fetchedModels.models.length} 个模型，来自上游 /models 接口`}
+          subtitle={`共 ${fetchedModels.models.length} 个模型 · 双击模型名可复制`}
           width={640}
           onClose={() => setFetchedModels(null)}
           footer={
@@ -447,19 +491,19 @@ export function Providers({
           ) : (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 420, overflowY: 'auto' }}>
               {fetchedModels.models.map((model) => (
-                <span
+                <button
+                  type="button"
                   key={model}
-                  className="mono"
-                  style={{
-                    padding: '4px 10px',
-                    borderRadius: 999,
-                    border: '1px solid var(--border-strong)',
-                    background: 'var(--surface-3)',
-                    fontSize: 11,
+                  className={`router-model-chip ${copiedModel === model ? 'copied' : ''}`}
+                  title={copiedModel === model ? '已复制' : '双击复制模型名'}
+                  onDoubleClick={() => void copyModel(model)}
+                  onClick={(event) => {
+                    // A single click should not hijack text selection/double-click.
+                    if (event.detail === 0) void copyModel(model);
                   }}
                 >
-                  {model}
-                </span>
+                  {copiedModel === model ? `✓ ${model}` : model}
+                </button>
               ))}
             </div>
           )}

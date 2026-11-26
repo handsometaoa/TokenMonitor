@@ -107,7 +107,7 @@ export interface RouterChannelHealth {
   lastSuccessAt: number | null;
 }
 
-export type RouterUsageRange = 'today' | '24h' | '7d' | '30d';
+export type RouterUsageRange = 'today' | '24h' | '7d' | '30d' | '1y';
 
 export interface RouterUsageTotals {
   requestCount: number;
@@ -132,7 +132,7 @@ export interface RouterUsageGroup extends RouterUsageTotals {
 }
 
 export interface RouterUsageSeries {
-  granularity: 'hour' | 'day';
+  granularity: 'hour' | 'day' | 'month';
   buckets: string[];
   labels: string[];
   requestCount: number[];

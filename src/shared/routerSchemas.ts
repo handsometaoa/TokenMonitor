@@ -24,7 +24,7 @@ export const ROUTER_PROVIDER_KINDS = [
   'xai',
   'google',
 ] as const;
-export const ROUTER_USAGE_RANGES = ['today', '24h', '7d', '30d'] as const;
+export const ROUTER_USAGE_RANGES = ['today', '24h', '7d', '30d', '1y'] as const;
 
 export const routerProtocolSchema = z.enum(ROUTER_PROTOCOLS);
 export const routerProviderKindSchema = z.enum(ROUTER_PROVIDER_KINDS);

@@ -1108,12 +1108,20 @@ export class RouterRepository {
     const now = Date.now();
     const todayStart = startOfLocalDay(now);
     const useHourly = range === 'today' || range === '24h';
-    const days = range === '30d' ? 30 : 7;
+    // A full year is grouped by month so the chart stays readable (12 bars).
+    const useMonthly = range === '1y';
+    const days = range === '1y' ? 365 : range === '30d' ? 30 : 7;
+    const monthStart = new Date(now);
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    monthStart.setMonth(monthStart.getMonth() - 11);
     const startTs = range === 'today'
       ? todayStart
       : range === '24h'
         ? now - 23 * 60 * 60 * 1000
-        : startOfLocalDay(now) - (days - 1) * 24 * 60 * 60 * 1000;
+        : useMonthly
+          ? monthStart.getTime()
+          : startOfLocalDay(now) - (days - 1) * 24 * 60 * 60 * 1000;
     const startKey = useHourly ? localHourKey(startTs) : localDayKey(startTs);
     const table = useHourly ? 'usage_hourly' : 'usage_daily';
     const keyColumn = useHourly ? 'hour_key' : 'date';
@@ -1127,7 +1135,8 @@ export class RouterRepository {
     const models = new Map<string, RouterUsageTotals>();
     const buckets = new Map<string, RouterUsageTotals>();
     for (const row of rows) {
-      const bucketKey = nonEmptyString(row[keyColumn]);
+      const rawKey = nonEmptyString(row[keyColumn]);
+      const bucketKey = rawKey && useMonthly ? rawKey.slice(0, 7) : rawKey;
       if (!bucketKey) continue;
       const totalsRow: RouterUsageTotals = {
         requestCount: row.request_count,
@@ -1209,6 +1218,7 @@ export class RouterRepository {
     now: number,
   ): RouterUsageSeries {
     const useHourly = range === 'today' || range === '24h';
+    const useMonthly = range === '1y';
     const keys: string[] = [];
     if (useHourly) {
       const start = range === 'today' ? startOfLocalDay(now) : now - 23 * 60 * 60 * 1000;
@@ -1218,6 +1228,15 @@ export class RouterRepository {
       while (cursor.getTime() <= end.getTime()) {
         keys.push(localHourKey(cursor.getTime()));
         cursor.setHours(cursor.getHours() + 1);
+      }
+    } else if (useMonthly) {
+      const cursor = new Date(now);
+      cursor.setDate(1);
+      cursor.setHours(0, 0, 0, 0);
+      cursor.setMonth(cursor.getMonth() - 11);
+      for (let index = 0; index < 12; index += 1) {
+        keys.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`);
+        cursor.setMonth(cursor.getMonth() + 1);
       }
     } else {
       const days = range === '30d' ? 30 : 7;
@@ -1229,9 +1248,11 @@ export class RouterRepository {
       }
     }
     return {
-      granularity: useHourly ? 'hour' : 'day',
+      granularity: useHourly ? 'hour' : useMonthly ? 'month' : 'day',
       buckets: keys,
-      labels: keys.map((key) => (useHourly ? `${key.slice(11, 13)}:00` : key.slice(5))),
+      labels: keys.map((key) =>
+        useHourly ? `${key.slice(11, 13)}:00` : useMonthly ? `${key.slice(5)}月` : key.slice(5),
+      ),
       requestCount: keys.map((key) => buckets.get(key)?.requestCount ?? 0),
       totalTokens: keys.map((key) => buckets.get(key)?.totalTokens ?? 0),
       cacheTokens: keys.map((key) => buckets.get(key)?.cacheReadTokens ?? 0),

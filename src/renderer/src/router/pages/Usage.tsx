@@ -13,10 +13,22 @@ import { isRouterUsageRange } from '../../../../shared/routerSchemas';
 
 const RANGES: Array<{ value: RouterUsageRange; label: string }> = [
   { value: 'today', label: '今天' },
-  { value: '24h', label: '近 24 小时' },
+  { value: '24h', label: '最近 24 小时' },
   { value: '7d', label: '近 7 天' },
-  { value: '30d', label: '近 30 天' },
+  { value: '30d', label: '近一个月' },
+  { value: '1y', label: '近一年' },
 ];
+
+const RANGE_STORAGE_KEY = 'tokenmonitor.usage.range';
+
+function storedRange(): RouterUsageRange {
+  try {
+    const value = window.localStorage.getItem(RANGE_STORAGE_KEY);
+    return isRouterUsageRange(value) ? value : '7d';
+  } catch {
+    return '7d';
+  }
+}
 
 const ACTIVITY_DAYS = 90;
 const FLOW_DAYS = 7;
@@ -115,6 +127,7 @@ function TokenBreakdownCard({
 function UsageBars({ usage }: { usage: RouterUsageOverview }) {
   const max = useMemo(() => Math.max(1, ...usage.series.totalTokens), [usage]);
   const [hover, setHover] = useState<number | null>(null);
+  const count = usage.series.totalTokens.length;
   const hovered =
     hover === null
       ? null
@@ -124,11 +137,13 @@ function UsageBars({ usage }: { usage: RouterUsageOverview }) {
           requests: usage.series.requestCount[hover] ?? 0,
           cache: usage.series.cacheTokens[hover] ?? 0,
         };
+  // Anchor the tooltip to the hovered bar, clamped to the chart edges.
+  const tipLeft = hover === null || count === 0 ? '50%' : `${((hover + 0.5) / count) * 100}%`;
   return (
     <div className="router-bars" role="img" aria-label="tokens 趋势" onMouseLeave={() => setHover(null)}>
       {usage.series.totalTokens.map((value, index) => (
         <div
-          className="router-bar-slot"
+          className={`router-bar-slot ${hover === index ? 'active' : ''}`}
           key={usage.series.buckets[index]}
           onMouseEnter={() => setHover(index)}
         >
@@ -136,7 +151,10 @@ function UsageBars({ usage }: { usage: RouterUsageOverview }) {
         </div>
       ))}
       {hovered ? (
-        <div className="router-bar-tip">
+        <div
+          className="router-bar-tip"
+          style={{ left: `clamp(88px, ${tipLeft}, calc(100% - 88px))` }}
+        >
           <div className="router-bar-tip-date">{hovered.label}</div>
           <div className="router-bar-tip-row">
             <span>Tokens</span>
@@ -535,12 +553,21 @@ function ClientProviderFlowChart({ rows }: { rows: RouterClientProviderFlow[] })
 }
 
 export function Usage({ onError }: { onError: (message: string) => void }) {
-  const [range, setRange] = useState<RouterUsageRange>('7d');
+  const [range, setRange] = useState<RouterUsageRange>(storedRange);
   const [usage, setUsage] = useState<RouterUsageOverview | null>(null);
   const [activity, setActivity] = useState<RouterActivityDay[] | null>(null);
   const [flow, setFlow] = useState<RouterClientProviderFlow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [chartsLoading, setChartsLoading] = useState(false);
+
+  // Remember the last selected range across page switches and restarts.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(RANGE_STORAGE_KEY, range);
+    } catch {
+      // Storage unavailable; the selection just won't persist.
+    }
+  }, [range]);
 
   const load = async (nextRange = range) => {
     setLoading(true);

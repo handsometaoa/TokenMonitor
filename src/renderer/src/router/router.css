@@ -672,6 +672,64 @@ html[data-platform='darwin'] .settings-sidebar {
   color: var(--faint);
 }
 
+.router-model-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+}
+
+.router-model-picker-hint {
+  font-size: 9.5px;
+  color: var(--faint);
+}
+
+.router-model-picker-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 176px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--track-strong) transparent;
+}
+
+.router-model-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-solid);
+  color: var(--text);
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.router-model-chip:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.router-model-chip.active {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.router-model-chip.copied {
+  border-color: color-mix(in srgb, var(--good) 45%, transparent);
+  background: var(--good-soft);
+  color: var(--good);
+}
+
 .router-textarea {
   height: 96px;
   padding: 8px 10px;
@@ -825,6 +883,12 @@ html[data-platform='darwin'] .settings-sidebar {
   align-items: center;
   gap: 2px;
   justify-content: flex-end;
+}
+
+.router-status-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .router-empty-inline {
@@ -1180,14 +1244,19 @@ html[data-platform='darwin'] .settings-sidebar {
   min-width: 2px;
 }
 
-.router-bar-slot:hover .router-bar {
+.router-bar-slot:hover .router-bar,
+.router-bar-slot.active .router-bar {
   opacity: 1;
+}
+
+.router-bar-slot:hover .router-bar {
+  filter: brightness(1.06);
 }
 
 .router-bar-tip {
   position: absolute;
   top: 4px;
-  right: 4px;
+  transform: translateX(-50%);
   z-index: 2;
   min-width: 148px;
   padding: 9px 11px;
