@@ -20,6 +20,8 @@ Windows 托盘版 AI 额度监控 + 本地 AI 路由网关：悬浮球常驻桌�
 - **独立面板窗口**：点击悬浮球或 Windows 托盘图标，面板在触发按钮周围锚定展开（macOS 菜单栏下方 / Windows 任务栏上方）；失焦自动隐藏、Esc 收起；未配置悬浮球时可从托盘独立打开。
 - **实时状态推送**：余量、服务状态、路由数据全部由主进程广播，面板与悬浮球零轮询。
 
+<img src="docs/screenshots/orb.png" width="72" alt="orb" /> <img src="docs/screenshots/panel.png" width="360" alt="panel" />
+
 ### AI 路由（本地网关）
 
 - **三协议入口**：OpenAI Chat / Anthropic Messages / OpenAI Responses，3×3 协议转换，按对外模型名组成渠道组，自动故障转移。
