@@ -20,7 +20,7 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 function ringColor(remaining: number | null): string {
   if (remaining === null) return 'rgba(139, 148, 170, 0.45)';
-  if (remaining <= 5) return '#f87171';
+  if (remaining <= 5) return '#fd2201';
   if (remaining <= 20) return '#fbbf24';
   return '#34d399';
 }
