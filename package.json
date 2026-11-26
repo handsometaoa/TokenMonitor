@@ -1,6 +1,6 @@
 {
   "name": "tokenmonitor",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "A Windows tray monitor for OpenCode Go usage, inspired by CodexBar.",
   "main": "./out/main/index.js",
   "author": "TokenMonitor contributors",
