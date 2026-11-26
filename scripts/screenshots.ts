@@ -320,6 +320,15 @@ try {
   await panelPage.screenshot({ path: join(outDir, 'panel-quota.png') });
   console.log('captured panel-quota.png');
 
+  // Scroll to the service status section at the bottom of the quota tab.
+  await panelPage.evaluate(() => {
+    const scroller = document.querySelector('.panel-scroll');
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  });
+  await panelPage.waitForTimeout(500);
+  await panelPage.screenshot({ path: join(outDir, 'panel-status.png') });
+  console.log('captured panel-status.png');
+
   await panelPage.evaluate(() => window.tokenMonitor.hidePanel());
   await page.waitForTimeout(400);
 

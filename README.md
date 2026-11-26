@@ -14,6 +14,8 @@ Windows 托盘版 AI 额度监控 + 本地 AI 路由网关：悬浮球常驻桌�
 - **路由提供商余量**：DeepSeek、OpenRouter、Moonshot、SiliconFlow 等 25 家内置策略，显示窗口余量与**金额余额**；额度耗尽自动阻断渠道。
 - **Codex 额度重置积分**：显示可用重置次数与下一次过期倒计时。
 
+![Quota](docs/screenshots/quota.png)
+
 ### 悬浮球与面板
 
 - **悬浮球**：常驻桌面的 56px 圆窗，外环为所选供应商余量、中心为百分比或余额；右键切换**展示口径**（全部窗口最低 / 金额 / 5 小时 / 周 / 月）与余量来源；主进程拖拽循环，跟手拖动，位置自动记忆。
@@ -28,6 +30,15 @@ Windows 托盘版 AI 额度监控 + 本地 AI 路由网关：悬浮球常驻桌�
 - **负载均衡**：可用度权重、会话亲和、额度前置拦截；只在尚未向客户端写出字节时改道。
 - **请求日志与用量**：记录最终渠道、状态、耗时、TTFT、token 明细与重试轨迹；请求头/响应头以可折叠 JSON 树查看；按日/小时聚合，提供成功率、缓存、趋势与**Agent → 提供商 → 模型**三列流向图。
 - **实时速率**：主进程滑动窗口聚合 tokens/min，悬浮球之外的监控面板随请求即时更新。
+
+<p>
+  <img src="docs/screenshots/models.png" width="49%" alt="模型路由" />
+  <img src="docs/screenshots/service.png" width="49%" alt="本地网关" />
+</p>
+<p>
+  <img src="docs/screenshots/logs.png" width="49%" alt="请求日志" />
+  <img src="docs/screenshots/usage.png" width="49%" alt="用量统计" />
+</p>
 
 ### 体验
 
@@ -48,7 +59,7 @@ Windows 托盘版 AI 额度监控 + 本地 AI 路由网关：悬浮球常驻桌�
 | ZCode | `~/.zcode/v2/config.json` 的 Coding Plan Key | API Key；团队版 JSON |
 | AI Router 提供商 | — | Base URL + API Key / OAuth / Cookie |
 
-设置 → **服务配置** 为每个 Provider 保存凭证（手动凭证系统加密保存，不会传给渲染进程或写入日志）；设置页的「悬浮球」区可切换悬浮球开关、展示口径与余量来源。
+设置 → **常规** 为每个 Agent 独立开关并保存凭证（手动凭证系统加密保存，不会传给渲染进程或写入日志）；设置页的「悬浮球」区可切换悬浮球开关、展示口径与余量来源。
 
 BigModel 团队版需要额外选择器，可粘贴：
 
@@ -67,21 +78,33 @@ BigModel 团队版需要额外选择器，可粘贴：
 
 ## 安装 / 运行
 
+从 [GitHub Releases](https://github.com/handsometaoa/TokenMonitor/releases/latest) 下载安装包：
+
+- **Windows**：NSIS 安装包（x64）
+- **macOS**：DMG（x64 与 arm64，CI 自动构建）
+- 每个安装包附 `sha256` 校验文件
+
+从源码运行：
+
 ```bash
 npm install
 npm run dev          # 开发
 npm run dist:win     # Windows NSIS 安装包，产物在 release/
 ```
 
-当前安装包未签名，Windows SmartScreen 可能提示；选择"更多信息 → 仍要运行"。
+安装包未签名：Windows SmartScreen 可能提示，选择"更多信息 → 仍要运行"；macOS 首次打开若被 Gatekeeper 拦截，在"系统设置 → 隐私与安全性"里允许，或执行：
 
-> macOS 代码保持跨平台，但本项目当前只产出 Windows 安装包；macOS 需要在 macOS/CI 上构建。
+```bash
+xattr -cr /Applications/TokenMonitor.app
+# 或
+sudo xattr -rd com.apple.quarantine /Applications/TokenMonitor.app
+```
 
 ## 首次使用
 
 1. 打开 [OpenCode 控制台](https://opencode.ai/auth) 创建 API Key。
 2. 在引导页粘贴 Key，点击"测试并保存"；也可以尝试检测本机 `auth.json`。
-3. 需要更多 Provider 时，打开"设置 → 服务配置"，先登录对应客户端（Codex / Claude），或填 API Key / Cookie。
+3. 需要更多 Provider 时，打开"设置 → 常规"，先登录对应客户端（Codex / Claude），或填 API Key / Cookie。
 4. 需要本地路由时，打开"路由控制台 → 本地网关"启动网关（默认关闭，仅监听 `127.0.0.1`），在"提供商"里配置上游并在"模型路由"建立对外模型映射。
 5. 右键悬浮球可随时切换余量展示口径或隐藏悬浮球。
 
@@ -189,7 +212,7 @@ $env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"; npm install
 - OpenCode Go 的 usage 接口未公开，未来可能变更。
 - Codex / Claude / Cursor 在 Windows 上没有统一的安全凭证存储；本工具优先读取各自客户端的本地登录文件，或使用手动 Token/Cookie。不会刷新 OAuth Token，过期后需要重新登录客户端或更新凭证。
 - Cursor 的本地 token 如果是 Chromium DPAPI 加密的 `cursor-safe-storage`，当前不会尝试解密；请粘贴 Cookie header 或 session token。
-- ZCode 自动读取当前激活的 Coding Plan 凭证；BigModel 团队版需要 Organization/Project 选择器，否则额度接口会返回"无 Coding Plan"。此时请在服务配置中粘贴团队 JSON。
+- ZCode 自动读取当前激活的 Coding Plan 凭证；BigModel 团队版需要 Organization/Project 选择器，否则额度接口会返回"无 Coding Plan"。此时请在常规设置中粘贴团队 JSON。
 - AI Router 的余量策略目前内置 25 家；ai-router 的其余 provider 适配器尚未移植，策略注册表已留扩展点。
 - 路由日志默认保存请求/响应正文（鉴权头已剔除），保留 7 天；本地网关页可关闭正文落库，只保留状态、耗时、token 和标头。
 - 跨协议转换不保证协议特有字段全量保真；需要原样透传时让入口协议与上游协议一致。
@@ -197,7 +220,7 @@ $env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"; npm install
 - 路由用量依赖上游返回 usage：token 只统计成功请求，未返回 usage 时按字符估算，输出 tok/s 会显示"—"而不伪造。
 - 路由提供商的实时速率与流量统计只覆盖经过本地网关的请求；Agent 订阅（Codex 等直连）没有请求级数据。
 - 服务状态来自公开状态页：OpenCode、OpenAI、Anthropic、Cursor；Z.AI / ZCode 暂未发现稳定状态页。状态页请求失败时显示"状态页不可用"，不影响额度卡片。
-- Windows 安装包未签名；macOS 未提供首版构建。
+- Windows 安装包未签名；macOS DMG 由 CI 构建但同样未签名公证，首次打开需手动放行。
 - 面板悬浮于深色圆盘上的悬浮球在浅色桌面上同样可读；透明窗口的方角四角会拦截点击（56px 圆窗外约 4px 空隙）。
 
 ## 归属
