@@ -333,18 +333,29 @@ interface FlowNode {
   key: string;
   label: string;
   total: number;
+  tokens: number;
 }
 
-interface FlowLink {
+interface FlowClientLink {
   client: string;
   provider: string;
   count: number;
+  tokens: number;
+}
+
+interface FlowModelLink {
+  provider: string;
+  model: string;
+  count: number;
+  tokens: number;
 }
 
 interface FlowModel {
   clients: FlowNode[];
   providers: FlowNode[];
-  links: FlowLink[];
+  models: FlowNode[];
+  clientLinks: FlowClientLink[];
+  modelLinks: FlowModelLink[];
 }
 
 function flowLabel(key: string): string {
@@ -357,50 +368,89 @@ function truncateFlowLabel(value: string, max = 16): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
-function buildFlowModel(rows: RouterClientProviderFlow[]): FlowModel {
-  const clientTotals = new Map<string, number>();
-  const providerTotals = new Map<string, number>();
+function buildFlowModel(rawRows: RouterClientProviderFlow[]): FlowModel {
+  // Gateway-local rejections are not a real provider — keep them off the chart.
+  const rows = rawRows.filter((row) => row.providerName !== 'local-router');
+  const clientTotals = new Map<string, { count: number; tokens: number }>();
+  const providerTotals = new Map<string, { count: number; tokens: number }>();
+  const modelTotals = new Map<string, { count: number; tokens: number }>();
+  const bump = (
+    totals: Map<string, { count: number; tokens: number }>,
+    key: string,
+    count: number,
+    tokens: number,
+  ) => {
+    const entry = totals.get(key) ?? { count: 0, tokens: 0 };
+    entry.count += count;
+    entry.tokens += tokens;
+    totals.set(key, entry);
+  };
   for (const row of rows) {
-    clientTotals.set(row.client, (clientTotals.get(row.client) ?? 0) + row.requestCount);
-    providerTotals.set(row.providerName, (providerTotals.get(row.providerName) ?? 0) + row.requestCount);
+    bump(clientTotals, row.client, row.requestCount, row.totalTokens);
+    bump(providerTotals, row.providerName, row.requestCount, row.totalTokens);
+    bump(modelTotals, row.publicModel, row.requestCount, row.totalTokens);
   }
-  const pickTop = (totals: Map<string, number>) =>
+  const pickTop = (totals: Map<string, { count: number; tokens: number }>, limit: number) =>
     new Set(
       [...totals.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 6)
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, limit)
         .map(([key]) => key),
     );
-  const topClients = pickTop(clientTotals);
-  const topProviders = pickTop(providerTotals);
+  const topClients = pickTop(clientTotals, 6);
+  const topProviders = pickTop(providerTotals, 6);
+  const topModels = pickTop(modelTotals, 8);
   const clientKey = (value: string) => (topClients.has(value) ? value : FLOW_OTHER);
   const providerKey = (value: string) => (topProviders.has(value) ? value : FLOW_OTHER);
+  const modelKey = (value: string) => (topModels.has(value) ? value : FLOW_OTHER);
 
-  const merged = new Map<string, FlowLink>();
+  const clientLinks = new Map<string, FlowClientLink>();
+  const modelLinks = new Map<string, FlowModelLink>();
   for (const row of rows) {
     const client = clientKey(row.client);
     const provider = providerKey(row.providerName);
-    const key = `${client}\u0000${provider}`;
-    const link = merged.get(key);
-    if (link) link.count += row.requestCount;
-    else merged.set(key, { client, provider, count: row.requestCount });
+    const model = modelKey(row.publicModel);
+    const clientKey0 = `${client}\u0000${provider}`;
+    const clientLink = clientLinks.get(clientKey0);
+    if (clientLink) {
+      clientLink.count += row.requestCount;
+      clientLink.tokens += row.totalTokens;
+    } else {
+      clientLinks.set(clientKey0, { client, provider, count: row.requestCount, tokens: row.totalTokens });
+    }
+    const modelKey0 = `${provider}\u0000${model}`;
+    const modelLink = modelLinks.get(modelKey0);
+    if (modelLink) {
+      modelLink.count += row.requestCount;
+      modelLink.tokens += row.totalTokens;
+    } else {
+      modelLinks.set(modelKey0, { provider, model, count: row.requestCount, tokens: row.totalTokens });
+    }
   }
 
-  const toNodes = (totals: Map<string, number>, mapKey: (value: string) => string): FlowNode[] => {
-    const grouped = new Map<string, number>();
-    for (const [key, total] of totals) {
+  const toNodes = (
+    totals: Map<string, { count: number; tokens: number }>,
+    mapKey: (value: string) => string,
+  ): FlowNode[] => {
+    const grouped = new Map<string, { count: number; tokens: number }>();
+    for (const [key, value] of totals) {
       const mapped = mapKey(key);
-      grouped.set(mapped, (grouped.get(mapped) ?? 0) + total);
+      const entry = grouped.get(mapped) ?? { count: 0, tokens: 0 };
+      entry.count += value.count;
+      entry.tokens += value.tokens;
+      grouped.set(mapped, entry);
     }
     return [...grouped.entries()]
-      .map(([key, total]) => ({ key, label: flowLabel(key), total }))
+      .map(([key, value]) => ({ key, label: flowLabel(key), total: value.count, tokens: value.tokens }))
       .sort((a, b) => b.total - a.total);
   };
 
   return {
     clients: toNodes(clientTotals, clientKey),
     providers: toNodes(providerTotals, providerKey),
-    links: [...merged.values()].sort((a, b) => b.count - a.count),
+    models: toNodes(modelTotals, modelKey),
+    clientLinks: [...clientLinks.values()].sort((a, b) => b.count - a.count),
+    modelLinks: [...modelLinks.values()].sort((a, b) => b.count - a.count),
   };
 }
 
@@ -409,19 +459,22 @@ const FLOW_LABEL_WIDTH = 172;
 const FLOW_NODE_WIDTH = 12;
 const FLOW_PADDING_Y = 12;
 const FLOW_NODE_GAP = 16;
+const FLOW_MID_LABEL_SPACE = 16;
 
 function buildFlowGeometry(model: FlowModel) {
-  if (model.links.length === 0) return null;
-  const total = model.links.reduce((sum, link) => sum + link.count, 0);
-  const nodeCount = Math.max(model.clients.length, model.providers.length, 1);
+  if (model.clientLinks.length === 0 || model.modelLinks.length === 0) return null;
+  const total = model.clients.reduce((sum, node) => sum + node.total, 0);
+  const nodeCount = Math.max(model.clients.length, model.providers.length, model.models.length, 1);
   const content = Math.max(150, nodeCount * 30);
   const scale = total > 0 ? content / total : 0;
   const heightsOf = (nodes: FlowNode[]) => nodes.map((node) => Math.max(8, node.total * scale));
   const clientHeights = heightsOf(model.clients);
   const providerHeights = heightsOf(model.providers);
+  const modelHeights = heightsOf(model.models);
   const sideHeight = (heights: number[]) =>
     heights.reduce((sum, height) => sum + height, 0) + FLOW_NODE_GAP * Math.max(0, heights.length - 1);
-  const height = FLOW_PADDING_Y * 2 + Math.max(sideHeight(clientHeights), sideHeight(providerHeights));
+  const height =
+    FLOW_PADDING_Y * 2 + FLOW_MID_LABEL_SPACE + Math.max(sideHeight(clientHeights), sideHeight(providerHeights), sideHeight(modelHeights));
 
   const layout = (nodes: FlowNode[], heights: number[]) => {
     let cursor = FLOW_PADDING_Y;
@@ -433,48 +486,75 @@ function buildFlowGeometry(model: FlowModel) {
   };
   const clients = layout(model.clients, clientHeights);
   const providers = layout(model.providers, providerHeights);
+  const models = layout(model.models, modelHeights);
   const leftX = FLOW_LABEL_WIDTH;
+  const midX = FLOW_WIDTH / 2 - FLOW_NODE_WIDTH / 2;
   const rightX = FLOW_WIDTH - FLOW_LABEL_WIDTH - FLOW_NODE_WIDTH;
-  const startX = leftX + FLOW_NODE_WIDTH;
-  const endX = rightX;
-  const linksByKey = new Map(model.links.map((link) => [`${link.client}\u0000${link.provider}`, link]));
+
+  const clientLinksByKey = new Map(model.clientLinks.map((link) => [`${link.client}\u0000${link.provider}`, link]));
+  const modelLinksByKey = new Map(model.modelLinks.map((link) => [`${link.provider}\u0000${link.model}`, link]));
   const clientCursors = new Map(clients.map((node) => [node.key, node.y]));
-  const providerCursors = new Map(providers.map((node) => [node.key, node.y]));
-  const ribbons: Array<{
+  const providerInCursors = new Map(providers.map((node) => [node.key, node.y]));
+  const providerOutCursors = new Map(providers.map((node) => [node.key, node.y]));
+  const modelCursors = new Map(models.map((node) => [node.key, node.y]));
+
+  interface Ribbon {
     key: string;
     d: string;
     width: number;
     color: string;
-    client: string;
-    provider: string;
-    count: number;
-  }> = [];
+    title: string;
+  }
+  const ribbons: Ribbon[] = [];
+
+  const ribbonPath = (x1: number, y1: number, x2: number, y2: number, width: number) => {
+    const control = (x2 - x1) * 0.4;
+    return `M ${x1} ${y1 + width / 2} C ${x1 + control} ${y1 + width / 2}, ${x2 - control} ${y2 + width / 2}, ${x2} ${y2 + width / 2}`;
+  };
 
   clients.forEach((client, clientIndex) => {
     const color = FLOW_COLORS[clientIndex % FLOW_COLORS.length];
     for (const provider of providers) {
-      const link = linksByKey.get(`${client.key}\u0000${provider.key}`);
+      const link = clientLinksByKey.get(`${client.key}\u0000${provider.key}`);
       if (!link) continue;
       const y1 = clientCursors.get(client.key) ?? client.y;
-      const y2 = providerCursors.get(provider.key) ?? provider.y;
+      const y2 = providerInCursors.get(provider.key) ?? provider.y;
       const allocated = link.count * scale;
       const width = Math.max(1.4, allocated);
-      const control = (endX - startX) * 0.4;
       ribbons.push({
-        key: `${client.key}\u0000${provider.key}`,
-        d: `M ${startX} ${y1 + width / 2} C ${startX + control} ${y1 + width / 2}, ${endX - control} ${y2 + width / 2}, ${endX} ${y2 + width / 2}`,
+        key: `c-${client.key}\u0000${provider.key}`,
+        d: ribbonPath(leftX + FLOW_NODE_WIDTH, y1, midX, y2, width),
         width,
         color,
-        client: client.label,
-        provider: provider.label,
-        count: link.count,
+        title: `${client.label} → ${provider.label} · ${link.count} 次请求 · ${formatRouterTokens(link.tokens)} tokens`,
       });
       clientCursors.set(client.key, y1 + allocated);
-      providerCursors.set(provider.key, y2 + allocated);
+      providerInCursors.set(provider.key, y2 + allocated);
     }
   });
 
-  return { width: FLOW_WIDTH, height, clients, providers, ribbons, leftX, rightX };
+  providers.forEach((provider, providerIndex) => {
+    const color = FLOW_COLORS[(providerIndex + 3) % FLOW_COLORS.length];
+    for (const model of models) {
+      const link = modelLinksByKey.get(`${provider.key}\u0000${model.key}`);
+      if (!link) continue;
+      const y1 = providerOutCursors.get(provider.key) ?? provider.y;
+      const y2 = modelCursors.get(model.key) ?? model.y;
+      const allocated = link.count * scale;
+      const width = Math.max(1.4, allocated);
+      ribbons.push({
+        key: `m-${provider.key}\u0000${model.key}`,
+        d: ribbonPath(midX + FLOW_NODE_WIDTH, y1, rightX, y2, width),
+        width,
+        color,
+        title: `${provider.label} → ${model.label} · ${link.count} 次请求 · ${formatRouterTokens(link.tokens)} tokens`,
+      });
+      providerOutCursors.set(provider.key, y1 + allocated);
+      modelCursors.set(model.key, y2 + allocated);
+    }
+  });
+
+  return { width: FLOW_WIDTH, height, clients, providers, models, ribbons, leftX, midX, rightX };
 }
 
 function ClientProviderFlowChart({ rows }: { rows: RouterClientProviderFlow[] }) {
@@ -490,7 +570,7 @@ function ClientProviderFlowChart({ rows }: { rows: RouterClientProviderFlow[] })
       className="router-flow-svg"
       viewBox={`0 0 ${geometry.width} ${geometry.height}`}
       role="img"
-      aria-label="Agent 客户端到提供商的请求流向"
+      aria-label="Agent 客户端经提供商到模型的请求流向"
     >
       {geometry.ribbons.map((ribbon) => (
         <path
@@ -503,7 +583,7 @@ function ClientProviderFlowChart({ rows }: { rows: RouterClientProviderFlow[] })
           strokeOpacity={0.32}
           strokeLinecap="butt"
         >
-          <title>{`${ribbon.client} → ${ribbon.provider} · ${ribbon.count} 次请求`}</title>
+          <title>{ribbon.title}</title>
         </path>
       ))}
       {geometry.clients.map((node, index) => (
@@ -527,15 +607,36 @@ function ClientProviderFlowChart({ rows }: { rows: RouterClientProviderFlow[] })
           </text>
         </g>
       ))}
-      {geometry.providers.map((node, index) => (
+      {geometry.providers.map((node) => (
         <g key={`provider-${node.key}`}>
+          <rect
+            x={geometry.midX}
+            y={node.y}
+            width={FLOW_NODE_WIDTH}
+            height={Math.max(3, node.height)}
+            rx={3}
+            fill="var(--accent)"
+            fillOpacity={0.7}
+          />
+          <text
+            x={geometry.midX + FLOW_NODE_WIDTH / 2}
+            y={node.y + node.height + 11}
+            textAnchor="middle"
+            className="router-flow-label router-flow-label-mid"
+          >
+            {truncateFlowLabel(node.label)} · {node.total}
+          </text>
+        </g>
+      ))}
+      {geometry.models.map((node, index) => (
+        <g key={`model-${node.key}`}>
           <rect
             x={geometry.rightX}
             y={node.y}
             width={FLOW_NODE_WIDTH}
             height={Math.max(3, node.height)}
             rx={3}
-            fill={FLOW_COLORS[(index + 3) % FLOW_COLORS.length]}
+            fill={FLOW_COLORS[(index + 5) % FLOW_COLORS.length]}
           />
           <text
             x={geometry.rightX + FLOW_NODE_WIDTH + 8}
@@ -544,7 +645,7 @@ function ClientProviderFlowChart({ rows }: { rows: RouterClientProviderFlow[] })
             dominantBaseline="middle"
             className="router-flow-label"
           >
-            {truncateFlowLabel(node.label)} · {node.total}
+            {truncateFlowLabel(node.label, 20)} · {formatRouterTokens(node.tokens)}
           </text>
         </g>
       ))}
@@ -608,7 +709,7 @@ export function Usage({ onError }: { onError: (message: string) => void }) {
 
   const totals = usage?.totals;
   return (
-    <div className="router-page">
+    <div className={`router-page ${loading || chartsLoading ? 'page-refreshing' : ''}`}>
       <div className="router-toolbar">
         <div className="router-toolbar-actions">
           <select
@@ -695,8 +796,8 @@ export function Usage({ onError }: { onError: (message: string) => void }) {
       <div className="router-card">
         <div className="router-card-head compact">
           <div>
-            <div className="router-card-title">Agent → 提供商流向</div>
-            <div className="router-card-sub">近 7 天请求分布 · 左侧为客户端，右侧为提供商</div>
+            <div className="router-card-title">Agent → 提供商 → 模型流向</div>
+            <div className="router-card-sub">近 7 天请求分布 · 左侧为客户端，中间为提供商，右侧为模型 Tokens 流量</div>
           </div>
         </div>
         {flow ? <ClientProviderFlowChart rows={flow} /> : <div className="router-empty-inline">读取中…</div>}

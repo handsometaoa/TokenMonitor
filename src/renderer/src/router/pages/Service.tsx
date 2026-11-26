@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Copy, KeyRound, Play, RefreshCw, Square } from 'lucide-react';
 import type { RouterState } from '../../../../shared/routerTypes';
-import { CopyButton, RouterBadge, RouterStat } from '../components';
+import { CopyButton, RouterStat } from '../components';
+import { Toggle } from '../../components/ui';
 
 export function ServicePage({
   state,
@@ -26,6 +27,18 @@ export function ServicePage({
     setProxyUrl(config.proxyUrl);
     setCaptureBodies(config.captureBodies);
   }, [config.enabled, config.port, config.apiKey, config.proxyUrl, config.captureBodies]);
+
+  // Same instant-apply pattern as the Overview gateway card.
+  const toggleGateway = async (next: boolean) => {
+    setEnabled(next);
+    try {
+      await window.tokenMonitor.saveRouterServiceConfig({ enabled: next });
+      onChanged();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '网关开关失败');
+      setEnabled(!next);
+    }
+  };
 
   const save = async () => {
     setError(null);
@@ -60,17 +73,17 @@ export function ServicePage({
 
   return (
     <div className="router-page">
-      <div className="router-toolbar">
-        <RouterBadge tone={state.service.state === 'running' ? 'good' : state.service.state === 'error' ? 'danger' : 'warn'}>
-          {state.service.state === 'running' ? '运行中' : state.service.state === 'error' ? '错误' : '已停止'}
-        </RouterBadge>
-      </div>
-
       {state.service.error ? <div className="router-banner danger">{state.service.error}</div> : null}
       {error ? <div className="router-banner danger">{error}</div> : null}
 
       <div className="router-stats">
-        <RouterStat label="状态" value={state.service.state === 'running' ? '运行中' : '已停止'} hint={`端口 ${state.service.port}`} tone={state.service.state === 'running' ? 'good' : undefined} />
+        <RouterStat
+          label="网关"
+          value={state.service.state === 'running' ? '运行中' : state.service.state === 'error' ? '错误' : '已停止'}
+          hint={state.service.state === 'running' ? `127.0.0.1:${state.service.port}` : state.service.error ?? '未启动'}
+          tone={state.service.state === 'running' ? 'good' : state.service.state === 'error' ? 'danger' : undefined}
+          action={<Toggle checked={enabled} onChange={(next) => void toggleGateway(next)} label={enabled ? '停止本地网关' : '启动本地网关'} />}
+        />
         <RouterStat label="进行中请求" value={String(state.service.activeRequests)} hint="当前并发" />
         <RouterStat label="今日请求" value={String(state.usageToday.requests)} hint={`${state.usageToday.tokens.toLocaleString()} tokens`} />
         <RouterStat label="成功率" value={state.usageToday.successRate === null ? '—' : `${state.usageToday.successRate.toFixed(1)}%`} hint="今日" />
@@ -92,18 +105,6 @@ export function ServicePage({
         <div className="router-config-list">
           <div className="router-config-row">
             <div className="router-config-info">
-              <div className="router-config-label">服务开关</div>
-              <div className="router-config-hint">关闭后本地网关停止监听，客户端将无法连接。</div>
-            </div>
-            <div className="router-config-control">
-              <label className="router-check">
-                <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
-                启动本地网关
-              </label>
-            </div>
-          </div>
-          <div className="router-config-row">
-            <div className="router-config-info">
               <div className="router-config-label">监听端口</div>
               <div className="router-config-hint">1024-65535，仅监听本机 127.0.0.1。</div>
             </div>
@@ -118,8 +119,10 @@ export function ServicePage({
             </div>
             <div className="router-config-control">
               <div className="router-input-row">
-                <input className="router-input mono" value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
-                <CopyButton text={apiKey} label="复制" />
+                <div className="router-key-field">
+                  <input className="router-input mono bare" value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
+                  <CopyButton text={apiKey} iconOnly />
+                </div>
                 <button type="button" className="router-btn" onClick={() => void regenerate()}>
                   <KeyRound size={14} />
                   重新生成

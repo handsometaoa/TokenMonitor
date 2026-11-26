@@ -1,0 +1,14 @@
+/* Standalone panel window chrome: the panel's own header drags the frameless window. */
+.panel-window-shell {
+  height: 100%;
+}
+
+.panel-window-shell .titlebar {
+  -webkit-app-region: drag;
+}
+
+.panel-window-shell .titlebar button,
+.panel-window-shell .titlebar a,
+.panel-window-shell .titlebar .status-pill {
+  -webkit-app-region: no-drag;
+}

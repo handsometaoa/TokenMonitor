@@ -166,10 +166,13 @@ export interface RouterActivityDay {
   totalTokens: number;
 }
 
+/** One client×provider×model group of routed requests (flow sankey + model traffic). */
 export interface RouterClientProviderFlow {
   client: string;
   providerName: string;
+  publicModel: string;
   requestCount: number;
+  totalTokens: number;
 }
 
 export interface RouterModelTestResult {

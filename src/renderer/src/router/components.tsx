@@ -1,7 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { X } from 'lucide-react';
+import { Check, Copy } from 'lucide-react';
 import { formatTokens } from '../format';
 
+/**
+ * Every dialog that uses this modal closes via its footer (关闭/取消) or the
+ * overlay click — no header X, so there is no fragile tiny click target.
+ */
 export function RouterModal({
   title,
   subtitle,
@@ -25,9 +29,6 @@ export function RouterModal({
             <div className="router-modal-title">{title}</div>
             {subtitle ? <div className="router-modal-sub">{subtitle}</div> : null}
           </div>
-          <button type="button" className="router-icon-btn" onClick={onClose} aria-label="关闭">
-            <X size={16} />
-          </button>
         </div>
         <div className="router-modal-body">{children}</div>
         {footer ? <div className="router-modal-foot">{footer}</div> : null}
@@ -117,7 +118,7 @@ export function formatRouterTokens(value: number): string {
   return formatTokens(value);
 }
 
-export function CopyButton({ text, label = '复制' }: { text: string; label?: string }) {
+export function CopyButton({ text, label = '复制', iconOnly = false }: { text: string; label?: string; iconOnly?: boolean }) {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -125,6 +126,25 @@ export function CopyButton({ text, label = '复制' }: { text: string; label?: s
     const timer = setTimeout(() => setCopied(false), 1600);
     return () => clearTimeout(timer);
   }, [copied]);
+
+  if (iconOnly) {
+    return (
+      <button
+        type="button"
+        className="router-icon-btn copy-infield"
+        title={label}
+        aria-label={label}
+        onClick={() => {
+          void navigator.clipboard
+            .writeText(text)
+            .then(() => setCopied(true))
+            .catch(() => undefined);
+        }}
+      >
+        {copied ? <Check size={14} /> : <Copy size={14} />}
+      </button>
+    );
+  }
 
   return (
     <button

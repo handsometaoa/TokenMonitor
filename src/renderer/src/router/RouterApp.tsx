@@ -20,9 +20,7 @@ import type {
 } from '../../../shared/routerTypes';
 import { BrandMark } from '../components/Logo';
 import { createTranslator } from '../i18n';
-import { PanelView } from '../views/Panel';
 import { SettingsPage } from '../views/Settings';
-import { RouterBadge } from './components';
 import { Models } from './pages/Models';
 import { Logs } from './pages/Logs';
 import { Overview } from './pages/Overview';
@@ -55,7 +53,6 @@ export function RouterApp({ state }: { state: AppState }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(!state.settings.onboardingCompleted);
   const language = state.settings.language;
   const t = useMemo(() => createTranslator(language), [language]);
 
@@ -97,13 +94,12 @@ export function RouterApp({ state }: { state: AppState }) {
     return () => clearInterval(timer);
   }, []);
 
-  // Tray / IPC navigation keeps everything in the single main window.
+  // Tray / IPC navigation keeps router + settings in the single main window;
+  // the Token panel is its own window now.
   useEffect(
     () =>
       window.tokenMonitor.onNavigate((target) => {
         setAppSettingsOpen(target === 'settings');
-        if (target === 'panel') setPanelOpen(true);
-        if (target === 'router') setPanelOpen(false);
       }),
     [],
   );
@@ -119,7 +115,6 @@ export function RouterApp({ state }: { state: AppState }) {
   };
 
   const openAppSettings = () => {
-    setPanelOpen(false);
     setAppSettingsOpen(true);
   };
 
@@ -154,7 +149,7 @@ export function RouterApp({ state }: { state: AppState }) {
           })}
         </nav>
         <div className="router-sidebar-foot">
-          <button type="button" className="router-sidebar-settings" onClick={openAppSettings}>
+          <button type="button" className="router-sidebar-action" onClick={openAppSettings}>
             <Settings2 size={15} />
             设置
           </button>
@@ -173,9 +168,6 @@ export function RouterApp({ state }: { state: AppState }) {
             <div className="router-header-sub">{active.sub}</div>
           </div>
           <div className="router-header-actions no-drag">
-            <RouterBadge tone={serviceRunning ? 'good' : router.service.state === 'error' ? 'danger' : 'warn'}>
-              {serviceRunning ? '网关运行中' : router.service.state === 'error' ? '网关错误' : '网关已停止'}
-            </RouterBadge>
             <button type="button" className="router-btn" onClick={() => void reload()} disabled={loading}>
               <RefreshCw size={14} className={loading ? 'spin' : ''} />
               刷新
@@ -214,29 +206,10 @@ export function RouterApp({ state }: { state: AppState }) {
           {page === 'service' ? <ServicePage state={router} onChanged={() => void reload()} /> : null}
           {page === 'logs' ? <Logs onError={setError} /> : null}
           {page === 'usage' ? <Usage onError={setError} /> : null}
-          {page === 'quota' ? <Quota quota={router.quota} state={state} onRefresh={refreshQuota} /> : null}
+          {page === 'quota' ? <Quota quota={router.quota} onRefresh={refreshQuota} /> : null}
           {page === 'settings' ? <RouterSettings state={router} onChanged={() => void reload()} /> : null}
         </div>
       </main>
-
-      {panelOpen ? (
-        <>
-          <div className="router-float-scrim" onClick={() => setPanelOpen(false)} />
-          <aside className="router-float-panel" role="dialog" aria-label="Token 面板">
-            <PanelView
-              state={state}
-              onOpenSettings={openAppSettings}
-              onOpenRouter={() => setPanelOpen(false)}
-              onClose={() => setPanelOpen(false)}
-            />
-          </aside>
-        </>
-      ) : (
-        <button type="button" className="router-float-toggle no-drag" title="展开 Token 面板" onClick={() => setPanelOpen(true)}>
-          <Gauge size={16} />
-          <span>面板</span>
-        </button>
-      )}
     </div>
   );
 }

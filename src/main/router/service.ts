@@ -165,8 +165,10 @@ export class RouterService extends EventEmitter {
       config,
     };
     const providers = this.repo.listProviders(false);
-    const today = this.repo.getUsage('today').totals;
-    return {
+    // getState runs on every tray/broadcast cycle; skip the token_breakdown
+    // re-scan (seconds of blocking on busy days) — only totals are needed.
+    const today = this.repo.getUsage('today', { includeBreakdown: false }).totals;
+    const state: RouterState = {
       service,
       balance: this.repo.getBalanceConfig(),
       channelHealth: this.balancer.getHealth(providers.map((provider) => ({ id: provider.id, name: provider.name }))),
@@ -177,6 +179,7 @@ export class RouterService extends EventEmitter {
       },
       quota: this.getQuota(),
     };
+    return state;
   }
 
   getServiceConfig(): RouterServiceConfig {

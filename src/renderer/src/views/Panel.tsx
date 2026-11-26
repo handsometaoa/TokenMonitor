@@ -170,7 +170,15 @@ export function PanelView({
                       </button>
                     </div>
                     {state.router.quota
-                      .filter((quota) => quotaVisibility[routerQuotaIdentity(quota.providerId, quota.strategyId)] !== false)
+                      .filter((quota) => {
+                        const key = routerQuotaIdentity(quota.providerId, quota.strategyId);
+                        // A router provider mirroring an agent subscription is
+                        // deduped against the agent card: show the mirror only
+                        // when that agent card is hidden, so hiding the
+                        // subscription view never loses the provider quota.
+                        if (key.startsWith('router:')) return quotaVisibility[key] !== false;
+                        return quotaVisibility[key] === false;
+                      })
                       .map((quota) => (
                         <RouterQuotaCard key={quota.providerId} quota={quota} language={language} onOpenRouter={onOpenRouter} />
                       ))}

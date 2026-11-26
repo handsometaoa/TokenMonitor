@@ -32,5 +32,9 @@ export function createDefaultSettings(): AppSettings {
     orgId: '',
     onboardingCompleted: false,
     windowBounds: null,
+    orbEnabled: true,
+    orbPosition: null,
+    orbTargetKey: null,
+    orbQuotaView: 'all',
   };
 }

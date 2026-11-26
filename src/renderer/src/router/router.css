@@ -29,10 +29,6 @@ html[data-platform='darwin'] .router-header {
   padding-top: 30px;
 }
 
-html[data-platform='darwin'] .settings-sidebar {
-  padding-top: 44px;
-}
-
 .router-brand {
   display: flex;
   align-items: center;
@@ -110,7 +106,7 @@ html[data-platform='darwin'] .settings-sidebar {
   margin-top: 5px;
 }
 
-.router-sidebar-settings {
+.router-sidebar-action {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -127,7 +123,7 @@ html[data-platform='darwin'] .settings-sidebar {
   cursor: pointer;
 }
 
-.router-sidebar-settings:hover {
+.router-sidebar-action:hover {
   background: var(--surface-3);
   border-color: var(--border-strong);
 }
@@ -459,10 +455,22 @@ html[data-platform='darwin'] .settings-sidebar {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
 }
 
+/* Keep the accent gradient on hover — the generic surface hover would wash
+   it out to near-white and hide the white label. */
+.router-btn.primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  filter: brightness(1.1);
+}
+
 .router-btn.danger {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 26%, transparent);
   background: var(--danger-soft);
+}
+
+.router-btn.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
 }
 
 .router-btn.ghost {
@@ -492,6 +500,14 @@ html[data-platform='darwin'] .settings-sidebar {
 .router-icon-btn:hover {
   background: var(--surface-3);
   color: var(--text);
+}
+
+/* Header buttons sit inside the draggable header; keep the whole button
+ * clickable (no drag-region stealing) and give the X a generous hit area. */
+.router-header-actions .router-icon-btn {
+  -webkit-app-region: no-drag;
+  width: 32px;
+  height: 32px;
 }
 
 .router-icon-btn.danger:hover {
@@ -650,6 +666,41 @@ html[data-platform='darwin'] .settings-sidebar {
 .router-input-row .router-btn {
   height: 32px;
   flex: 0 0 auto;
+}
+
+/* API key field: bare input with an embedded copy icon on its right edge. */
+.router-key-field {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 3px 0 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-solid);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.router-key-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.router-key-field .router-input.bare {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.router-key-field .copy-infield {
+  flex: 0 0 auto;
+  color: var(--muted);
 }
 
 .router-form-section {
@@ -1023,6 +1074,101 @@ html[data-platform='darwin'] .settings-sidebar {
   color: var(--danger);
   background: var(--danger-soft);
   border-color: color-mix(in srgb, var(--danger) 20%, transparent);
+}
+
+/* Collapsible JSON tree (request/response headers in the log detail). */
+.json-tree {
+  max-height: 300px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  font-family: "Cascadia Mono", "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+.json-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: max-content;
+}
+
+.json-key {
+  color: var(--muted);
+}
+
+.json-value.string {
+  color: var(--text);
+  word-break: break-all;
+}
+
+.json-value.number {
+  color: var(--accent);
+}
+
+.json-value.boolean {
+  color: var(--warn, #d97706);
+}
+
+.json-value.null {
+  color: var(--faint);
+}
+
+.json-node {
+  min-width: max-content;
+}
+
+.json-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.json-toggle:hover .json-key {
+  color: var(--accent);
+}
+
+.json-toggle .json-key {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.json-summary {
+  color: var(--faint);
+  font-size: 10.5px;
+}
+
+.json-children {
+  margin-left: 8px;
+  padding-left: 12px;
+  border-left: 1px dashed var(--border);
+}
+
+/* Middle-column labels of the flow sankey sit under their nodes. */
+.router-flow-label-mid {
+  font-size: 9.5px;
+}
+
+/* Manual-refresh feedback: dim data regions while a page reloads. */
+.router-card,
+.router-stats,
+.router-pager {
+  transition: opacity 180ms ease;
+}
+
+.page-refreshing .router-card,
+.page-refreshing .router-stats,
+.page-refreshing .router-pager {
+  opacity: 0.55;
 }
 
 .router-code {
@@ -1564,80 +1710,6 @@ html[data-platform='darwin'] .settings-sidebar {
   font-size: 10.5px;
   font-weight: 600;
   fill: var(--muted);
-}
-
-.router-float-toggle {
-  position: fixed;
-  right: 0;
-  top: 50%;
-  z-index: 40;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  padding: 13px 8px;
-  border: 1px solid var(--border-strong);
-  border-right: 0;
-  border-radius: 12px 0 0 12px;
-  background: var(--surface-solid);
-  color: var(--muted);
-  box-shadow: var(--shadow-soft);
-  font: inherit;
-  font-size: 10px;
-  cursor: pointer;
-  transition: color 120ms ease, background 120ms ease;
-}
-
-.router-float-toggle span {
-  writing-mode: vertical-rl;
-  letter-spacing: 0.16em;
-}
-
-.router-float-toggle:hover {
-  color: var(--accent);
-  background: var(--surface-3);
-}
-
-.router-float-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 45;
-  background: rgb(0 0 0 / 0.28);
-  backdrop-filter: blur(1.5px);
-}
-
-.router-float-panel {
-  position: fixed;
-  z-index: 46;
-  top: 14px;
-  right: 14px;
-  bottom: 14px;
-  width: min(470px, calc(100vw - 28px));
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 24px;
-  background:
-    radial-gradient(90% 60% at 8% 0%, var(--blob-1) 0%, transparent 62%),
-    radial-gradient(80% 60% at 100% 12%, var(--blob-2) 0%, transparent 60%),
-    linear-gradient(145deg, var(--bg), var(--bg-deep));
-  box-shadow: 0 30px 80px rgb(0 0 0 / 0.34);
-  animation: router-float-in 170ms ease-out;
-}
-
-.router-float-panel .panel-shell {
-  height: 100%;
-}
-
-@keyframes router-float-in {
-  from {
-    opacity: 0;
-    transform: translateX(26px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
 }
 
 @media (max-width: 1080px) {

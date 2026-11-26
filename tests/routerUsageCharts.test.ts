@@ -119,21 +119,21 @@ describe('router usage activity', () => {
 });
 
 describe('router client provider flow', () => {
-  it('groups requests by client and provider, mapping missing clients to unknown', () => {
+  it('groups requests by client, provider and model, mapping missing clients to unknown', () => {
     const db = repo();
     logRequest(db, { requestId: 'f-1', daysAgo: 0, client: 'Cursor', providerName: 'Mock A' });
     logRequest(db, { requestId: 'f-2', daysAgo: 0, client: 'Cursor', providerName: 'Mock A' });
-    logRequest(db, { requestId: 'f-3', daysAgo: 1, client: 'Cursor', providerName: 'Mock B' });
+    logRequest(db, { requestId: 'f-3', daysAgo: 1, client: 'Cursor', providerName: 'Mock B', publicModel: 'model-b', totalTokens: 500 });
     logRequest(db, { requestId: 'f-4', daysAgo: 2, client: null, providerName: 'Mock A' });
     logRequest(db, { requestId: 'f-5', daysAgo: 2, client: '', providerName: 'Mock A' });
-    logRequest(db, { requestId: 'f-6', daysAgo: 3, client: 'Claude Code', providerName: 'Mock B' });
+    logRequest(db, { requestId: 'f-6', daysAgo: 3, client: 'Claude Code', providerName: 'Mock B', publicModel: 'model-b', totalTokens: 300 });
 
     const flow = db.getClientProviderFlow(7);
     expect(flow).toEqual([
-      { client: 'Cursor', providerName: 'Mock A', requestCount: 2 },
-      { client: 'unknown', providerName: 'Mock A', requestCount: 2 },
-      { client: 'Claude Code', providerName: 'Mock B', requestCount: 1 },
-      { client: 'Cursor', providerName: 'Mock B', requestCount: 1 },
+      { client: 'Cursor', providerName: 'Mock A', publicModel: 'model-a', requestCount: 2, totalTokens: 0 },
+      { client: 'unknown', providerName: 'Mock A', publicModel: 'model-a', requestCount: 2, totalTokens: 0 },
+      { client: 'Claude Code', providerName: 'Mock B', publicModel: 'model-b', requestCount: 1, totalTokens: 300 },
+      { client: 'Cursor', providerName: 'Mock B', publicModel: 'model-b', requestCount: 1, totalTokens: 500 },
     ]);
     db.close();
   });
@@ -143,8 +143,12 @@ describe('router client provider flow', () => {
     logRequest(db, { requestId: 'g-1', daysAgo: 10, client: 'Cursor', providerName: 'Mock' });
     logRequest(db, { requestId: 'g-2', daysAgo: 0, client: 'Cursor', providerName: 'Mock' });
 
-    expect(db.getClientProviderFlow(30)).toEqual([{ client: 'Cursor', providerName: 'Mock', requestCount: 1 }]);
-    expect(db.getClientProviderFlow(1)).toEqual([{ client: 'Cursor', providerName: 'Mock', requestCount: 1 }]);
+    expect(db.getClientProviderFlow(30)).toEqual([
+      { client: 'Cursor', providerName: 'Mock', publicModel: 'model-a', requestCount: 1, totalTokens: 0 },
+    ]);
+    expect(db.getClientProviderFlow(1)).toEqual([
+      { client: 'Cursor', providerName: 'Mock', publicModel: 'model-a', requestCount: 1, totalTokens: 0 },
+    ]);
     db.close();
   });
 });

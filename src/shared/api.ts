@@ -69,6 +69,12 @@ export interface TokenMonitorApi {
   clearQuotaHistory(): Promise<AppState>;
   openSettings(): Promise<void>;
   hideWindow(): Promise<void>;
+  hidePanel(): Promise<void>;
+  togglePanel(): Promise<void>;
+  startOrbDrag(): Promise<void>;
+  endOrbDrag(): Promise<void>;
+  resetOrbPosition(): Promise<void>;
+  requestOrbContextMenu(): Promise<void>;
   openExternal(url: string): Promise<void>;
   openDataFolder(): Promise<void>;
   setLaunchAtLogin(enabled: boolean): Promise<AppState>;
@@ -77,7 +83,7 @@ export interface TokenMonitorApi {
   onNavigate(listener: (target: AppNavigateTarget) => void): () => void;
 }
 
-export type AppNavigateTarget = 'router' | 'settings' | 'panel';
+export type AppNavigateTarget = 'router' | 'settings';
 
 /** Main → renderer channel for in-window navigation (tray/IPC shortcuts). */
 export const APP_NAVIGATE = 'app:navigate';
@@ -125,6 +131,12 @@ export const IPC = {
   clearQuotaHistory: 'quota:clear-history',
   openSettings: 'window:open-settings',
   hideWindow: 'window:hide',
+  hidePanel: 'window:hide-panel',
+  togglePanel: 'window:toggle-panel',
+  orbDragStart: 'orb:drag-start',
+  orbDragEnd: 'orb:drag-end',
+  orbResetPosition: 'orb:reset-position',
+  orbContextMenu: 'orb:context-menu',
   openExternal: 'app:open-external',
   openDataFolder: 'app:open-data-folder',
   setLaunchAtLogin: 'app:set-launch-at-login',

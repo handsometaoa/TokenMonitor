@@ -1,7 +1,16 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { _electron as electron } from 'playwright-core';
+import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core';
 import { electronExecutablePath } from './electron-path.js';
+
+async function waitForWindow(app: ElectronApplication, urlPart: string): Promise<Page> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const found = app.windows().find((window) => window.url().includes(urlPart));
+    if (found) return found;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(`Window containing "${urlPart}" did not appear.`);
+}
 
 const demo = process.argv.includes('--demo');
 const outDir = join(process.cwd(), 'tmp');
@@ -16,7 +25,9 @@ const app = await electron.launch({
 });
 
 try {
-  const page = await app.firstWindow();
+  // firstWindow can race with the lightweight orb window on startup; the
+  // router console is always the index.html page.
+  const page = await waitForWindow(app, 'index.html');
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
   page.on('console', (message) => {
@@ -24,19 +35,19 @@ try {
   });
   await page.waitForTimeout(1600);
 
-  if (await page.locator('.router-float-panel').count()) {
-    await page.screenshot({ path: join(outDir, 'ui-demo-panel.png') });
-    await page.locator('button[title="收起面板"]').first().click();
-    await page.waitForTimeout(300);
-  }
   await page.evaluate(() => window.tokenMonitor.updateSettings({ onboardingCompleted: true }));
   await page.waitForTimeout(500);
   await page.screenshot({ path: join(outDir, 'ui-demo-router.png') });
 
-  await page.locator('button[title="展开 Token 面板"]').click();
-  await page.waitForTimeout(500);
-  await page.screenshot({ path: join(outDir, 'ui-demo-panel-open.png') });
-  await page.locator('button[title="收起面板"]').first().click();
+  // The Token panel is its own window now: toggle it from the orb surface,
+  // capture it, then collapse it again.
+  const orbPage = await waitForWindow(app, 'orb.html');
+  await orbPage.evaluate(() => window.tokenMonitor.togglePanel());
+  const panelPage = await waitForWindow(app, 'panel.html');
+  await panelPage.locator('.panel-shell').waitFor({ timeout: 5000 });
+  await panelPage.waitForTimeout(400);
+  await panelPage.screenshot({ path: join(outDir, 'ui-demo-panel-open.png') });
+  await panelPage.evaluate(() => window.tokenMonitor.hidePanel());
   await page.waitForTimeout(300);
 
   await page.getByRole('button', { name: '用量统计', exact: true }).click();

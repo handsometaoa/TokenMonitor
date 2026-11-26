@@ -44,6 +44,15 @@ const settingsSchema = z.object({
       height: z.number().min(400).max(2000),
     })
     .nullable(),
+  orbEnabled: z.boolean(),
+  orbPosition: z
+    .object({
+      x: z.number(),
+      y: z.number(),
+    })
+    .nullable(),
+  orbTargetKey: z.string().max(100).nullable(),
+  orbQuotaView: z.enum(['all', 'money', 'hours', 'week', 'month']),
 });
 
 export class SettingsStore extends EventEmitter {
@@ -121,6 +130,12 @@ export class SettingsStore extends EventEmitter {
               ...(asRecord(record.quotaVisibility) ?? {}),
             },
             trayShowRouterQuota: record.trayShowRouterQuota ?? defaults.trayShowRouterQuota,
+            // Backfill fields added after v0.7.1: without these the schema
+            // parse below fails and the whole settings file gets reset.
+            orbEnabled: record.orbEnabled ?? defaults.orbEnabled,
+            orbPosition: record.orbPosition ?? defaults.orbPosition,
+            orbTargetKey: record.orbTargetKey ?? defaults.orbTargetKey,
+            orbQuotaView: record.orbQuotaView ?? defaults.orbQuotaView,
           }
         : raw;
       const parsed = settingsSchema.safeParse(migrated);

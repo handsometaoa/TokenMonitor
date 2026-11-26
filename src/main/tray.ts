@@ -22,9 +22,11 @@ export class TrayManager {
     const icon = this.iconFor(this.iconState(this.controller.getState()));
     this.tray = new Tray(icon);
     this.tray.setToolTip('TokenMonitor');
+    // Left click expands/collapses the panel around the tray icon on every
+    // platform (macOS: below the menu bar icon, Windows: above the taskbar).
     this.tray.on('click', (_event, bounds) => {
       if (bounds) this.lastBounds = bounds;
-      this.windows.toggleMain();
+      this.windows.togglePanel(bounds ?? this.lastBounds);
     });
     this.tray.on('right-click', () => {
       this.refreshMenu();
@@ -118,9 +120,13 @@ export class TrayManager {
         });
       }
     }
-    for (const quota of (state.settings.trayShowRouterQuota ? state.router.quota : []).filter(
-      (quota) => visibility[routerQuotaIdentity(quota.providerId, quota.strategyId)] !== false,
-    )) {
+    for (const quota of (state.settings.trayShowRouterQuota ? state.router.quota : []).filter((quota) => {
+      const key = routerQuotaIdentity(quota.providerId, quota.strategyId);
+      // Mirror rows dedup against their agent row: show the mirror only when
+      // the agent row is hidden, so hiding subscriptions keeps provider quota.
+      if (key.startsWith('router:')) return visibility[key] !== false;
+      return visibility[key] === false;
+    })) {
       if (quota.windows.length > 0) {
         const remaining = Math.min(...quota.windows.map((window) => Math.max(0, 100 - window.usedPercent)));
         items.push({
@@ -137,8 +143,20 @@ export class TrayManager {
 
     items.push({ type: 'separator' });
     items.push({
+      label: zh ? '打开主窗口' : 'Open main window',
+      click: () => this.windows.showMain(),
+    });
+    items.push({
       label: zh ? '打开面板' : 'Open dashboard',
       click: () => this.windows.showPanel(),
+    });
+    items.push({
+      label: zh ? '悬浮球' : 'Floating orb',
+      type: 'checkbox',
+      checked: state.settings.orbEnabled,
+      click: (item) => {
+        this.controller.updateSettings({ orbEnabled: item.checked });
+      },
     });
     items.push({
       label: `AI Router · ${

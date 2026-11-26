@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { APP_NAVIGATE, IPC, type TokenMonitorApi } from '../shared/api';
+import { APP_NAVIGATE, IPC, type AppNavigateTarget, type TokenMonitorApi } from '../shared/api';
 import type { AppState } from '../shared/types';
 
 const api: TokenMonitorApi = {
@@ -46,6 +46,12 @@ const api: TokenMonitorApi = {
   clearQuotaHistory: () => ipcRenderer.invoke(IPC.clearQuotaHistory),
   openSettings: () => ipcRenderer.invoke(IPC.openSettings),
   hideWindow: () => ipcRenderer.invoke(IPC.hideWindow),
+  hidePanel: () => ipcRenderer.invoke(IPC.hidePanel),
+  togglePanel: () => ipcRenderer.invoke(IPC.togglePanel),
+  startOrbDrag: () => ipcRenderer.invoke(IPC.orbDragStart),
+  endOrbDrag: () => ipcRenderer.invoke(IPC.orbDragEnd),
+  resetOrbPosition: () => ipcRenderer.invoke(IPC.orbResetPosition),
+  requestOrbContextMenu: () => ipcRenderer.invoke(IPC.orbContextMenu),
   openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, url),
   openDataFolder: () => ipcRenderer.invoke(IPC.openDataFolder),
   setLaunchAtLogin: (enabled) => ipcRenderer.invoke(IPC.setLaunchAtLogin, enabled),
@@ -56,7 +62,7 @@ const api: TokenMonitorApi = {
     return () => ipcRenderer.removeListener(IPC.stateChanged, handler);
   },
   onNavigate: (listener) => {
-    const handler = (_event: Electron.IpcRendererEvent, target: 'router' | 'settings' | 'panel') => listener(target);
+    const handler = (_event: Electron.IpcRendererEvent, target: AppNavigateTarget) => listener(target);
     ipcRenderer.on(APP_NAVIGATE, handler);
     return () => ipcRenderer.removeListener(APP_NAVIGATE, handler);
   },

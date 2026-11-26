@@ -1,8 +1,7 @@
+import { useState } from 'react';
 import { RefreshCw } from 'lucide-react';
-import type { AppState } from '../../../../shared/types';
 import type { RouterQuotaSnapshot } from '../../../../shared/routerTypes';
 import { RouterBadge, formatRouterTime } from '../components';
-import { SubscriptionCredentials } from '../../views/SubscriptionCredentials';
 
 function QuotaWindowRow({ window }: { window: RouterQuotaSnapshot['windows'][number] }) {
   const remaining = Math.max(0, 100 - window.usedPercent);
@@ -28,25 +27,35 @@ function QuotaWindowRow({ window }: { window: RouterQuotaSnapshot['windows'][num
 
 export function Quota({
   quota,
-  state,
   onRefresh,
 }: {
   quota: RouterQuotaSnapshot[];
-  state: AppState;
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
 }) {
+  const [busy, setBusy] = useState(false);
+  const refresh = async () => {
+    setBusy(true);
+    try {
+      await onRefresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="router-page">
+    <div className={`router-page ${busy ? 'page-refreshing' : ''}`}>
       <div className="router-toolbar">
-        <button type="button" className="router-btn" onClick={onRefresh}>
-          <RefreshCw size={14} />
+        <button type="button" className="router-btn" onClick={() => void refresh()} disabled={busy}>
+          <RefreshCw size={14} className={busy ? 'spin' : ''} />
           刷新余量
         </button>
       </div>
 
       {quota.length === 0 ? (
         <div className="router-card">
-          <div className="router-empty-inline">还没有绑定余量策略。到「提供商」编辑一个提供商，选择余量策略即可。</div>
+          <div className="router-empty-inline">
+            还没有绑定余量策略。到「提供商」编辑一个提供商，选择余量策略即可；本机检测的订阅额度在「设置 → 服务配置」。
+          </div>
         </div>
       ) : (
         <div className="router-quota-grid">
@@ -91,16 +100,6 @@ export function Quota({
           ))}
         </div>
       )}
-
-      <div className="router-card">
-        <div className="router-card-head compact">
-          <div>
-            <div className="router-card-title">订阅额度监控</div>
-            <div className="router-card-sub">Codex / Claude / Cursor / Z.AI / ZCode 本机登录态检测与手动凭证</div>
-          </div>
-        </div>
-        <SubscriptionCredentials state={state} language="zh-CN" onChanged={onRefresh} />
-      </div>
     </div>
   );
 }

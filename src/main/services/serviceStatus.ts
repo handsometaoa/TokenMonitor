@@ -32,6 +32,72 @@ const STATUS_PAGES: StatusPageConfig[] = [
   },
 ];
 
+// OpenCode runs a self-hosted status page (not Statuspage) with its own JSON
+// shape: { status: 'ok'|'degraded'|..., components: [{service, status}], incidents: [{resolvedAt|null}] }.
+const OPENCODE_STATUS = {
+  providerId: 'opencode',
+  providerName: 'OpenCode',
+  url: 'https://opencode.ai/status/api/status',
+  pageUrl: 'https://opencode.ai/status',
+};
+
+function opencodeIndicator(value: unknown): ServiceStatus['indicator'] {
+  const normalized = typeof value === 'string' ? value.toLowerCase() : '';
+  if (normalized === 'ok' || normalized === 'operational') return 'none';
+  if (normalized === 'degraded') return 'minor';
+  if (normalized === 'outage' || normalized === 'down') return 'major';
+  return 'unknown';
+}
+
+async function fetchOpencodeStatus(fetchImpl: ExtraFetch): Promise<ServiceStatus> {
+  try {
+    const response = await fetchImpl(OPENCODE_STATUS.url, {
+      method: 'GET',
+      headers: { Accept: 'application/json', 'User-Agent': 'TokenMonitor/0.4.6' },
+      signal: AbortSignal.timeout(12_000),
+      cache: 'no-store',
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const root = asRecord(await response.json()) ?? {};
+    const rawComponents = Array.isArray(root.components) ? root.components : [];
+    const incidents = Array.isArray(root.incidents) ? root.incidents : [];
+    const components = rawComponents
+      .map((raw) => asRecord(raw))
+      .filter((raw): raw is Record<string, unknown> => raw !== null)
+      .map((raw) => ({
+        name: typeof raw.service === 'string' ? raw.service : 'Component',
+        status: typeof raw.status === 'string' ? raw.status : 'unknown',
+      }))
+      .slice(0, 6);
+    return {
+      providerId: OPENCODE_STATUS.providerId,
+      providerName: OPENCODE_STATUS.providerName,
+      indicator: opencodeIndicator(root.status),
+      description: typeof root.status === 'string' ? root.status : 'Unknown status',
+      incidentCount: incidents.filter((raw) => {
+        const incident = asRecord(raw);
+        return incident !== null && incident.resolvedAt === null;
+      }).length,
+      components,
+      updatedAt: Date.now(),
+      url: OPENCODE_STATUS.pageUrl,
+      error: root.stale === true ? '状态数据已过期' : undefined,
+    };
+  } catch (error) {
+    return {
+      providerId: OPENCODE_STATUS.providerId,
+      providerName: OPENCODE_STATUS.providerName,
+      indicator: 'unknown',
+      description: '状态页暂时不可用',
+      incidentCount: 0,
+      components: [],
+      updatedAt: Date.now(),
+      url: OPENCODE_STATUS.pageUrl,
+      error: errorMessage(error),
+    };
+  }
+}
+
 function indicator(value: unknown): ServiceStatus['indicator'] {
   return value === 'none' || value === 'minor' || value === 'major' || value === 'critical' ? value : 'unknown';
 }
@@ -117,9 +183,10 @@ export class ServiceStatusService extends EventEmitter {
   }
 
   private async doRefresh(): Promise<void> {
-    const results: ServiceStatus[] = [];
-    await Promise.all(
-      STATUS_PAGES.map(async (page) => {
+    // Every fetcher RETURNS its result; Promise.all collects them in one place.
+    const results = await Promise.all([
+      fetchOpencodeStatus(this.fetchImpl),
+      ...STATUS_PAGES.map(async (page) => {
         try {
           const response = await this.fetchImpl(page.url, {
             method: 'GET',
@@ -131,35 +198,36 @@ export class ServiceStatusService extends EventEmitter {
           const json: unknown = await response.json();
           const normalized = normalizeStatusPage(page.providerId, page.providerName, page.url.replace('/api/v2/summary.json', ''), json);
           const relevant = normalized.components.filter((component) => page.components.test(component.name));
-          results.push({
+          return {
             ...normalized,
             components: (relevant.length ? relevant : normalized.components).slice(0, 6),
-          });
+          };
         } catch (error) {
           this.logger.warn(`${page.providerName} status fetch failed: ${errorMessage(error)}`);
-          results.push({
+          return {
             providerId: page.providerId,
             providerName: page.providerName,
-            indicator: 'unknown',
+            indicator: 'unknown' as const,
             description: '状态页暂时不可用',
             incidentCount: 0,
             components: [],
             updatedAt: Date.now(),
             url: page.url.replace('/api/v2/summary.json', ''),
             error: errorMessage(error),
-          });
+          };
         }
       }),
-    );
-
-    const order = new Map<ExtraProviderId, number>([
-      ['codex', 0],
-      ['claude', 1],
-      ['cursor', 2],
-      ['zai', 3],
-      ['zcode', 4],
     ]);
-    this.statuses = results.sort((a, b) => (order.get(a.providerId) ?? 9) - (order.get(b.providerId) ?? 9));
+
+    const order = new Map<string, number>([
+      ['opencode', 0],
+      ['codex', 1],
+      ['claude', 2],
+      ['cursor', 3],
+      ['zai', 4],
+      ['zcode', 5],
+    ]);
+    this.statuses = [...results].sort((a, b) => (order.get(a.providerId) ?? 9) - (order.get(b.providerId) ?? 9));
     this.emit('changed');
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
@@ -170,6 +238,20 @@ export class ServiceStatusService extends EventEmitter {
 
   private demoStatuses(): ServiceStatus[] {
     return [
+      {
+        providerId: 'opencode',
+        providerName: 'OpenCode',
+        indicator: 'none',
+        description: 'All systems operational',
+        incidentCount: 0,
+        components: [
+          { name: 'inference', status: 'operational' },
+          { name: 'go', status: 'operational' },
+          { name: 'console', status: 'operational' },
+        ],
+        updatedAt: Date.now(),
+        url: 'https://opencode.ai/status',
+      },
       {
         providerId: 'codex',
         providerName: 'Codex',

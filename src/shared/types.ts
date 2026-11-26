@@ -1,5 +1,5 @@
 export const APP_NAME = 'TokenMonitor';
-export const APP_VERSION = '0.4.6';
+export const APP_VERSION = '0.7.2';
 export const QUOTA_API_URL = 'https://opencode.ai/zen/go/v1/usage';
 
 export type QuotaWindowId = 'rolling' | 'weekly' | 'monthly';
@@ -38,7 +38,8 @@ export interface ServiceStatusComponent {
 }
 
 export interface ServiceStatus {
-  providerId: ExtraProviderId;
+  /** Loosely typed: 'opencode' has a custom status page and is not an ExtraProviderId. */
+  providerId: string;
   providerName: string;
   indicator: 'none' | 'minor' | 'major' | 'critical' | 'unknown';
   description: string;
@@ -160,6 +161,11 @@ export interface WindowBounds {
   height: number;
 }
 
+export interface OrbPosition {
+  x: number;
+  y: number;
+}
+
 export interface AppSettings {
   schemaVersion: 1;
   theme: Theme;
@@ -181,6 +187,13 @@ export interface AppSettings {
   orgId: string;
   onboardingCompleted: boolean;
   windowBounds: WindowBounds | null;
+  /** Persistent always-on-top floating orb; position null = default spot near the tray. */
+  orbEnabled: boolean;
+  orbPosition: OrbPosition | null;
+  /** Quota identity key (agentQuotaKey / routerQuotaIdentity) shown on the orb; null = first available. */
+  orbTargetKey: string | null;
+  /** Which quota slice the orb displays: lowest window, money balance, or a fixed window bucket. */
+  orbQuotaView: 'all' | 'money' | 'hours' | 'week' | 'month';
 }
 
 export type CredentialKind = 'none' | 'manual' | 'env' | 'auth-file';
@@ -269,4 +282,8 @@ export interface UpdateSettingsPatch {
   orgId?: string;
   onboardingCompleted?: boolean;
   windowBounds?: WindowBounds | null;
+  orbEnabled?: boolean;
+  orbPosition?: OrbPosition | null;
+  orbTargetKey?: string | null;
+  orbQuotaView?: 'all' | 'money' | 'hours' | 'week' | 'month';
 }

@@ -26,6 +26,8 @@ import type { Translator } from '../i18n';
 import { formatRelative } from '../format';
 import { useNow } from '../hooks';
 import { Banner, SectionCard, Segmented, Spinner, Toggle } from '../components/ui';
+import { BrandMark } from '../components/Logo';
+import { orbTargets } from '../orbTargets';
 import { SubscriptionCredentials } from './SubscriptionCredentials';
 
 type SettingsSection = 'general' | 'notifications' | 'appearance' | 'data' | 'about';
@@ -135,51 +137,66 @@ export function SettingsPage({
     }
   };
 
+  const sectionLabel = t(NAV.find((item) => item.id === section)?.labelKey ?? 'settings.general');
+
   return (
     <div className="settings-shell">
-      <aside className="settings-sidebar">
-        <div className="settings-brand drag">
-          <span className="brand-mark" style={{ width: 28, height: 28 }} aria-hidden="true">
-            <svg width="17" height="17" viewBox="0 0 32 32" fill="none">
-              <rect x="5" y="17" width="5.5" height="10" rx="2.2" fill="white" opacity="0.82" />
-              <rect x="13.25" y="11" width="5.5" height="16" rx="2.2" fill="white" opacity="0.92" />
-              <rect x="21.5" y="5" width="5.5" height="22" rx="2.2" fill="white" />
-            </svg>
-          </span>
+      <aside className="router-sidebar">
+        <div className="router-brand">
+          <BrandMark size={26} />
           <div>
-            <div className="brand-title">TokenMonitor</div>
-            <div className="brand-sub">{t('app.subtitle')}</div>
+            <div className="router-brand-title">TokenMonitor</div>
+            <div className="router-brand-sub">AI Router</div>
           </div>
         </div>
-        {NAV.map((item) => {
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              className={`settings-nav-item ${section === item.id ? 'active' : ''}`}
-              onClick={() => setSection(item.id)}
-            >
-              <Icon size={15} strokeWidth={1.9} />
-              {t(item.labelKey)}
-            </button>
-          );
-        })}
-        <div className="settings-sidebar-footer">
+        <nav className="router-nav">
+          {NAV.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`router-nav-item ${section === item.id ? 'active' : ''}`}
+                onClick={() => setSection(item.id)}
+              >
+                <Icon size={16} strokeWidth={1.9} />
+                {t(item.labelKey)}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="router-sidebar-foot">
           {onClose ? (
-            <button type="button" className="settings-back-btn" onClick={onClose}>
-              <ArrowLeft size={14} />
+            <button type="button" className="router-sidebar-action" onClick={onClose}>
+              <ArrowLeft size={15} />
               {language === 'zh-CN' ? '返回路由台' : 'Back to router'}
             </button>
           ) : null}
-          v{appInfo?.version ?? state.version}
-          <br />
-          {t('app.official')}
+          <div className="router-service-line">
+            <span
+              className={`router-dot ${
+                state.router.service.state === 'running' ? 'good' : state.router.service.state === 'error' ? 'danger' : 'warn'
+              }`}
+            />
+            <span>
+              {state.router.service.state === 'running' ? `127.0.0.1:${state.router.service.port}` : '网关未启动'}
+            </span>
+          </div>
+          <div className="router-faint">
+            v{appInfo?.version ?? state.version} · 本地优先 · {t('app.official')}
+          </div>
         </div>
       </aside>
 
       <main className="settings-main">
-        <div className="settings-content fade-in" key={section}>
+        <header className="router-header settings-header drag">
+          <div>
+            <div className="router-header-title">{sectionLabel}</div>
+            <div className="router-header-sub">{t('app.subtitle')}</div>
+          </div>
+        </header>
+        <div className="settings-scroll">
+          <div className="settings-content fade-in" key={section}>
           {notice ? (
             <div style={{ marginBottom: 14 }}>
               <Banner tone={notice.tone === 'danger' ? 'danger' : 'info'}>{notice.text}</Banner>
@@ -188,8 +205,6 @@ export function SettingsPage({
 
           {section === 'general' ? (
             <>
-              <h1 className="settings-page-title">{t('settings.general')}</h1>
-              <p className="settings-page-sub">{t('app.subtitle')}</p>
               <SectionCard title={t('settings.runtimeTitle')} subtitle={t('settings.runtimeSub')}>
                 <div className="settings-row">
                   <div className="settings-row-copy">
@@ -234,8 +249,6 @@ export function SettingsPage({
 
           {section === 'notifications' ? (
             <>
-              <h1 className="settings-page-title">{t('settings.notificationsTitle')}</h1>
-              <p className="settings-page-sub">{t('settings.notificationsSub')}</p>
               <SectionCard title={t('settings.notificationsTitle')}>
                 <div className="switch-row">
                   <div className="switch-copy">
@@ -291,8 +304,6 @@ export function SettingsPage({
 
           {section === 'appearance' ? (
             <>
-              <h1 className="settings-page-title">{t('settings.appearanceTitle')}</h1>
-              <p className="settings-page-sub">{t('settings.behavior')}</p>
               <SectionCard title={t('settings.appearanceTitle')}>
                 <div className="settings-row">
                   <div className="settings-row-copy">
@@ -362,6 +373,94 @@ export function SettingsPage({
               </SectionCard>
 
               <SectionCard
+                title={language === 'zh-CN' ? '悬浮球' : 'Floating orb'}
+                subtitle={
+                  language === 'zh-CN'
+                    ? '常驻桌面的实时小圆窗：可拖拽，单击展开 Token 面板，右键快捷设置。'
+                    : 'A live desktop mini-window: drag to move, click to expand the Token panel, right-click for quick settings.'
+                }
+              >
+                <div className="switch-row">
+                  <div className="switch-copy">
+                    <strong>{language === 'zh-CN' ? '启用悬浮球' : 'Enable floating orb'}</strong>
+                    <span>
+                      {language === 'zh-CN'
+                        ? '关闭后仍可从托盘菜单或左键托盘图标打开面板。'
+                        : 'When off, the panel stays available from the tray icon and menu.'}
+                    </span>
+                  </div>
+                  <Toggle
+                    checked={state.settings.orbEnabled}
+                    onChange={(next) => void update({ orbEnabled: next })}
+                    label={language === 'zh-CN' ? '启用悬浮球' : 'Enable floating orb'}
+                  />
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-copy">
+                    <strong>{language === 'zh-CN' ? '展示口径' : 'Quota view'}</strong>
+                    <span>
+                      {language === 'zh-CN'
+                        ? '金额显示余额；5 小时/周/月锁定对应窗口；全部取最低剩余窗口。'
+                        : 'Balance shows money; the window options pin a fixed window; All uses the lowest remaining window.'}
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <Segmented
+                      value={state.settings.orbQuotaView}
+                      options={[
+                        { value: 'all', label: language === 'zh-CN' ? '全部' : 'All' },
+                        { value: 'money', label: language === 'zh-CN' ? '金额' : 'Money' },
+                        { value: 'hours', label: language === 'zh-CN' ? '5 小时' : '5h' },
+                        { value: 'week', label: language === 'zh-CN' ? '周' : 'Week' },
+                        { value: 'month', label: language === 'zh-CN' ? '月' : 'Month' },
+                      ]}
+                      onChange={(value) => void update({ orbQuotaView: value })}
+                    />
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-copy">
+                    <strong>{language === 'zh-CN' ? '余量来源' : 'Quota source'}</strong>
+                    <span>
+                      {language === 'zh-CN'
+                        ? '外环与百分比取自该供应商的最低剩余窗口。'
+                        : 'Ring and percentage come from the lowest remaining window of this provider.'}
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <select
+                      className="field"
+                      style={{ width: 190, height: 34 }}
+                      value={state.settings.orbTargetKey ?? ''}
+                      onChange={(event) =>
+                        void update({ orbTargetKey: event.target.value === '' ? null : event.target.value })
+                      }
+                    >
+                      <option value="">{language === 'zh-CN' ? '自动（第一个可用）' : 'Auto (first available)'}</option>
+                      {orbTargets(state).map((target) => (
+                        <option key={target.key} value={target.key}>
+                          {target.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-copy">
+                    <strong>{language === 'zh-CN' ? '位置' : 'Position'}</strong>
+                    <span>
+                      {language === 'zh-CN' ? '拖回默认位置（托盘附近屏幕右上角）。' : 'Reset to the default spot near the tray.'}
+                    </span>
+                  </div>
+                  <div className="settings-control">
+                    <button type="button" className="btn btn-sm" onClick={() => void window.tokenMonitor.resetOrbPosition()}>
+                      {language === 'zh-CN' ? '重置位置' : 'Reset position'}
+                    </button>
+                  </div>
+                </div>
+              </SectionCard>
+
+              <SectionCard
                 title={language === 'zh-CN' ? '主面板卡片' : 'Home cards'}
                 subtitle={
                   language === 'zh-CN'
@@ -406,8 +505,6 @@ export function SettingsPage({
 
           {section === 'data' ? (
             <>
-              <h1 className="settings-page-title">{t('settings.dataTitle')}</h1>
-              <p className="settings-page-sub">{t('settings.dataSub')}</p>
               <SectionCard title={t('settings.dataTitle')}>
                 <div className="settings-row">
                   <div className="settings-row-copy">
@@ -443,8 +540,6 @@ export function SettingsPage({
 
           {section === 'about' ? (
             <>
-              <h1 className="settings-page-title">{t('settings.aboutTitle')}</h1>
-              <p className="settings-page-sub">{t('settings.aboutSub')}</p>
               <SectionCard title={t('settings.aboutTitle')}>
                 <div className="settings-row">
                   <div className="settings-row-copy">
@@ -480,6 +575,7 @@ export function SettingsPage({
               </SectionCard>
             </>
           ) : null}
+          </div>
         </div>
       </main>
     </div>

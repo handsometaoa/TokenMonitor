@@ -31,7 +31,14 @@ if (!gotLock) {
     const showWindow = () => windows?.showMain();
 
     controller = new AppController(baseDir, demo, fetchImpl, showWindow);
-    windows = new WindowManager(() => tray?.getBounds() ?? null);
+    const bootController = controller;
+    windows = new WindowManager(
+      () => tray?.getBounds() ?? null,
+      () => bootController.settings.get(),
+    );
+    windows.orbPositionPersist = (position) => {
+      bootController.updateSettings({ orbPosition: position });
+    };
 
     const shutdown = async () => {
       if (cleanedUp) return;
@@ -61,11 +68,13 @@ if (!gotLock) {
     currentWindows.installApplicationMenu();
     tray.create();
     registerIpc(currentController, currentWindows, quit);
+    currentWindows.applyOrbVisibility(currentController.getState().settings.orbEnabled);
 
     currentController.on('state', () => {
       if (quitting) return;
       const state = currentController.getState();
       currentWindows.broadcast(state);
+      currentWindows.applyOrbVisibility(state.settings.orbEnabled);
       tray?.update();
     });
 

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, Search } from 'lucide-react';
+import { RefreshCw, Search, Trash2 } from 'lucide-react';
 import type { RouterLogEntry, RouterLogPage } from '../../../../shared/routerTypes';
 import { parseJson } from '../../../../shared/validation';
 import { RouterBadge, RouterModal, formatRouterDuration, formatRouterTime, statusTone } from '../components';
+import { JsonTree } from '../JsonTree';
 import { CodeViewer } from '../CodeViewer';
 
 function bodyLanguage(value: string | null): 'json' | 'plaintext' {
@@ -72,7 +73,7 @@ export function Logs({ onError }: { onError: (message: string) => void }) {
   const selectedCacheHit = selected ? cacheHitPercent(selected) : null;
 
   return (
-    <div className="router-page">
+    <div className={`router-page ${loading ? 'page-refreshing' : ''}`}>
       <div className="router-toolbar">
         <div className="router-toolbar-actions">
           <div className="router-search">
@@ -102,6 +103,18 @@ export function Logs({ onError }: { onError: (message: string) => void }) {
           <button type="button" className="router-btn" onClick={() => void load(0)} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'spin' : ''} />
             刷新
+          </button>
+          <button
+            type="button"
+            className="router-btn danger"
+            onClick={() => {
+              if (window.confirm('清空全部请求日志？此操作不可恢复。')) {
+                void window.tokenMonitor.clearRouterLogs().then(() => load(0));
+              }
+            }}
+          >
+            <Trash2 size={14} />
+            清空日志
           </button>
         </div>
       </div>
@@ -247,7 +260,7 @@ export function Logs({ onError }: { onError: (message: string) => void }) {
           ) : null}
           <div className="router-detail-section">
             <div className="router-detail-title">请求头</div>
-            <pre className="router-pre">{selected.requestHeaders ?? '—'}</pre>
+            <JsonTree value={selected.requestHeaders} />
           </div>
           <div className="router-detail-section">
             <div className="router-detail-title">请求正文</div>
@@ -255,7 +268,7 @@ export function Logs({ onError }: { onError: (message: string) => void }) {
           </div>
           <div className="router-detail-section">
             <div className="router-detail-title">响应头</div>
-            <pre className="router-pre">{selected.responseHeaders ?? '—'}</pre>
+            <JsonTree value={selected.responseHeaders} />
           </div>
           <div className="router-detail-section">
             <div className="router-detail-title">响应正文</div>

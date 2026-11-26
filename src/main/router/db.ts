@@ -43,6 +43,9 @@ import { DEFAULT_ROUTER_BALANCE, DEFAULT_ROUTER_PORT } from '../../shared/router
 
 const SCHEMA_VERSION = 4;
 
+/** Dashboard polling hits getUsage constantly; the expensive breakdown is cached briefly. */
+const USAGE_CACHE_TTL_MS = 45_000;
+
 export interface RouterProviderRow {
   id: string;
   name: string;
@@ -192,7 +195,9 @@ const activityRowSchema = z.object({
 const flowRowSchema = z.object({
   client_key: textColumn,
   provider_name: textColumn,
+  public_model: textColumn,
   request_count: integerColumn,
+  total_tokens: integerColumn,
 });
 const breakdownRowSchema = z.object({
   system: nullableIntegerColumn,
@@ -341,6 +346,7 @@ function emptyTotals(): RouterUsageTotals {
 
 export class RouterRepository {
   private readonly db: DatabaseSync;
+  private readonly usageCache = new Map<string, { at: number; overview: RouterUsageOverview }>();
 
   constructor(baseDir: string) {
     mkdirSync(baseDir, { recursive: true });
@@ -911,6 +917,9 @@ export class RouterRepository {
         input.requestId,
       );
 
+    // New request data invalidates the cached usage overview.
+    this.usageCache.clear();
+
     if (row.aggregated) return;
     const success = input.status >= 200 && input.status < 300;
     const totals: RouterUsageTotals = {
@@ -1028,6 +1037,7 @@ export class RouterRepository {
   clearLogs(): void {
     this.db.prepare('DELETE FROM request_logs').run();
     this.db.prepare('DELETE FROM usage_hourly').run();
+    this.usageCache.clear();
   }
 
   pruneUsage(days = 7): void {
@@ -1104,7 +1114,15 @@ export class RouterRepository {
     };
   }
 
-  getUsage(range: RouterUsageRange): RouterUsageOverview {
+  getUsage(range: RouterUsageRange, options: { includeBreakdown?: boolean } = {}): RouterUsageOverview {
+    // The breakdown re-parses token_breakdown JSON for every row in range —
+    // seconds of main-process blocking on busy days. Polling callers that only
+    // need totals must opt out via includeBreakdown: false, and the result is
+    // cached briefly so periodic dashboard polling stays off the hot path.
+    const includeBreakdown = options.includeBreakdown ?? true;
+    const cacheKey = `${range}|${includeBreakdown}`;
+    const cached = this.usageCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < USAGE_CACHE_TTL_MS) return cached.overview;
     const now = Date.now();
     const todayStart = startOfLocalDay(now);
     const useHourly = range === 'today' || range === '24h';
@@ -1157,12 +1175,18 @@ export class RouterRepository {
       addTotals(totals, totalsRow);
       const providerKey = row.provider_name;
       const modelKey = row.public_model;
-      const providerTotals = providers.get(providerKey) ?? emptyTotals();
-      addTotals(providerTotals, totalsRow);
-      providers.set(providerKey, providerTotals);
-      const modelTotals = models.get(modelKey) ?? emptyTotals();
-      addTotals(modelTotals, totalsRow);
-      models.set(modelKey, modelTotals);
+      // Gateway-local rejections are not a real provider/model — keep them in
+      // totals but out of the per-provider / per-model breakdowns.
+      if (providerKey !== 'local-router') {
+        const providerTotals = providers.get(providerKey) ?? emptyTotals();
+        addTotals(providerTotals, totalsRow);
+        providers.set(providerKey, providerTotals);
+      }
+      if (modelKey !== '-') {
+        const modelTotals = models.get(modelKey) ?? emptyTotals();
+        addTotals(modelTotals, totalsRow);
+        models.set(modelKey, modelTotals);
+      }
       const bucket = buckets.get(bucketKey) ?? emptyTotals();
       addTotals(bucket, totalsRow);
       buckets.set(bucketKey, bucket);
@@ -1170,21 +1194,23 @@ export class RouterRepository {
 
     const series = this.buildSeries(range, buckets, now);
 
-    const rawBreakdownRow = this.db
-      .prepare(
-        `SELECT
-          SUM(CAST(json_extract(token_breakdown,'$.system') AS INTEGER)) AS system,
-          SUM(CAST(json_extract(token_breakdown,'$.tools') AS INTEGER)) AS tools,
-          SUM(CAST(json_extract(token_breakdown,'$.user') AS INTEGER)) AS user,
-          SUM(CAST(json_extract(token_breakdown,'$.toolResults') AS INTEGER)) AS toolResults,
-          SUM(CAST(json_extract(token_breakdown,'$.assistant') AS INTEGER)) AS assistant,
-          SUM(CAST(json_extract(token_breakdown,'$.reasoning') AS INTEGER)) AS reasoning,
-          SUM(CAST(json_extract(token_breakdown,'$.reply') AS INTEGER)) AS reply
-        FROM request_logs
-        WHERE started_at >= ? AND token_breakdown IS NOT NULL
-          AND json_valid(token_breakdown) AND json_type(token_breakdown) = 'object'`,
-      )
-      .get(startTs);
+    const rawBreakdownRow = includeBreakdown
+      ? this.db
+        .prepare(
+          `SELECT
+            SUM(CAST(json_extract(token_breakdown,'$.system') AS INTEGER)) AS system,
+            SUM(CAST(json_extract(token_breakdown,'$.tools') AS INTEGER)) AS tools,
+            SUM(CAST(json_extract(token_breakdown,'$.user') AS INTEGER)) AS user,
+            SUM(CAST(json_extract(token_breakdown,'$.toolResults') AS INTEGER)) AS toolResults,
+            SUM(CAST(json_extract(token_breakdown,'$.assistant') AS INTEGER)) AS assistant,
+            SUM(CAST(json_extract(token_breakdown,'$.reasoning') AS INTEGER)) AS reasoning,
+            SUM(CAST(json_extract(token_breakdown,'$.reply') AS INTEGER)) AS reply
+          FROM request_logs
+          WHERE started_at >= ? AND token_breakdown IS NOT NULL
+            AND json_valid(token_breakdown) AND json_type(token_breakdown) = 'object'`,
+        )
+        .get(startTs)
+      : null;
     const breakdownRow = parseRow(breakdownRowSchema, rawBreakdownRow);
     const breakdown: RouterUsageBreakdown = {
       system: finiteNumber(breakdownRow?.system) ?? 0,
@@ -1196,7 +1222,7 @@ export class RouterRepository {
       reply: finiteNumber(breakdownRow?.reply) ?? 0,
     };
 
-    return {
+    const overview: RouterUsageOverview = {
       range,
       totals,
       providers: [...providers.entries()]
@@ -1210,6 +1236,8 @@ export class RouterRepository {
         ? breakdown
         : null,
     };
+    this.usageCache.set(cacheKey, { at: now, overview });
+    return overview;
   }
 
   private buildSeries(
@@ -1303,10 +1331,12 @@ export class RouterRepository {
       flowRowSchema,
       this.db
         .prepare(`
-          SELECT COALESCE(NULLIF(client, ''), 'unknown') AS client_key, provider_name, count(*) AS request_count
+          SELECT COALESCE(NULLIF(client, ''), 'unknown') AS client_key, provider_name,
+            COALESCE(NULLIF(public_model, '-'), '-') AS public_model,
+            count(*) AS request_count, COALESCE(SUM(total_tokens), 0) AS total_tokens
           FROM request_logs WHERE log_date >= ?
-          GROUP BY 1, 2
-          ORDER BY request_count DESC, 1, 2
+          GROUP BY 1, 2, 3
+          ORDER BY request_count DESC, 1, 2, 3
         `)
         .all(cutoff),
     );
@@ -1314,7 +1344,9 @@ export class RouterRepository {
       .map((row) => ({
         client: row.client_key,
         providerName: row.provider_name,
+        publicModel: row.public_model,
         requestCount: row.request_count,
+        totalTokens: row.total_tokens,
       }))
       .filter((row) => row.requestCount > 0);
   }

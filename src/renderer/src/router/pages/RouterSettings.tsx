@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FolderOpen, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { RefreshCw, Save } from 'lucide-react';
 import type { RouterState } from '../../../../shared/routerTypes';
 import { Field } from '../components';
 
@@ -45,8 +45,8 @@ export function RouterSettings({
   return (
     <div className="router-page">
       <div className="router-toolbar">
-        <button type="button" className="router-btn primary" onClick={() => void save()} disabled={busy}>
-          {busy ? <RefreshCw size={14} className="spin" /> : <Save size={14} />}
+        <button type="button" className="router-btn primary sm" onClick={() => void save()} disabled={busy}>
+          {busy ? <RefreshCw size={13} className="spin" /> : <Save size={13} />}
           {busy ? '保存中…' : '保存'}
         </button>
       </div>
@@ -86,36 +86,6 @@ export function RouterSettings({
               onChange={(event) => setMaxAttempts(event.target.value.replace(/\D/g, ''))}
             />
           </Field>
-        </div>
-      </div>
-
-      <div className="router-card">
-        <div className="router-card-head compact">
-          <div>
-            <div className="router-card-title">数据与维护</div>
-            <div className="router-card-sub">日志保留 7 天；用量日聚合永久保留，小时聚合随日志清理。</div>
-          </div>
-        </div>
-        <div className="router-settings-actions">
-          <button type="button" className="router-btn" onClick={() => void window.tokenMonitor.openDataFolder()}>
-            <FolderOpen size={14} />
-            打开数据目录
-          </button>
-          <button
-            type="button"
-            className="router-btn danger"
-            onClick={async () => {
-              if (!window.confirm('清空全部请求日志？用量聚合不会被删除。')) return;
-              await window.tokenMonitor.clearRouterLogs();
-              onChanged();
-            }}
-          >
-            <Trash2 size={14} />
-            清空请求日志
-          </button>
-        </div>
-        <div className="router-hint">
-          路由器数据保存在 <code>router.db</code>（SQLite WAL）；提供商 Key 使用系统 DPAPI/Keychain 加密，仅主进程可读。
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
+import { app, dialog, ipcMain, Menu, shell, type IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import { IPC } from '../shared/api';
 import { routerProtocolSchema, routerProviderKindSchema, routerUsageRangeSchema } from '../shared/routerSchemas';
@@ -47,6 +47,9 @@ const settingsPatchSchema = z.object({
     })
     .nullable()
     .optional(),
+  orbEnabled: z.boolean().optional(),
+  orbTargetKey: z.string().max(100).nullable().optional(),
+  orbQuotaView: z.enum(['all', 'money', 'hours', 'week', 'month']).optional(),
 });
 
 function assertTrusted(event: IpcMainInvokeEvent, windows: WindowManager): void {
@@ -376,6 +379,79 @@ export function registerIpc(
   ipcMain.handle(IPC.hideWindow, (event) => {
     assertTrusted(event, windows);
     windows.hideMain();
+  });
+
+  ipcMain.handle(IPC.togglePanel, (event) => {
+    assertTrusted(event, windows);
+    windows.togglePanel(windows.getOrbBounds());
+  });
+
+  ipcMain.handle(IPC.hidePanel, (event) => {
+    assertTrusted(event, windows);
+    windows.hidePanel();
+  });
+
+  ipcMain.handle(IPC.orbDragStart, (event) => {
+    assertTrusted(event, windows);
+    windows.startOrbDrag();
+  });
+
+  ipcMain.handle(IPC.orbDragEnd, (event) => {
+    assertTrusted(event, windows);
+    windows.endOrbDrag();
+  });
+
+  ipcMain.handle(IPC.orbResetPosition, (event) => {
+    assertTrusted(event, windows);
+    windows.resetOrbPosition();
+  });
+
+  ipcMain.handle(IPC.orbContextMenu, (event) => {
+    assertTrusted(event, windows);
+    const orb = windows.getOrbWindow();
+    if (!orb) return;
+    const settings = controller.getState().settings;
+    const zh = settings.language === 'zh-CN';
+    const viewItem = (view: 'all' | 'money' | 'hours' | 'week' | 'month', label: string): Electron.MenuItemConstructorOptions => ({
+      label,
+      type: 'radio',
+      checked: settings.orbQuotaView === view,
+      click: () => {
+        controller.updateSettings({ orbQuotaView: view });
+      },
+    });
+    const menu = Menu.buildFromTemplate([
+      {
+        label: zh ? '展示口径' : 'Quota view',
+        enabled: false,
+      },
+      viewItem('all', zh ? '全部窗口最低' : 'Lowest window'),
+      viewItem('money', zh ? '金额' : 'Balance'),
+      viewItem('hours', zh ? '5 小时窗口' : '5-hour window'),
+      viewItem('week', zh ? '周窗口' : 'Weekly window'),
+      viewItem('month', zh ? '月窗口' : 'Monthly window'),
+      { type: 'separator' },
+      {
+        label: zh ? '打开面板' : 'Open dashboard',
+        click: () => {
+          windows.togglePanel(windows.getOrbBounds());
+        },
+      },
+      {
+        label: zh ? '设置…' : 'Settings…',
+        click: () => {
+          windows.showSettings();
+        },
+      },
+      { type: 'separator' },
+      {
+        label: zh ? '隐藏悬浮球' : 'Hide floating orb',
+        click: () => {
+          controller.updateSettings({ orbEnabled: false });
+        },
+      },
+    ]);
+    menu.popup({ window: orb });
   });
 
   ipcMain.handle(IPC.openExternal, async (event, url: unknown) => {
